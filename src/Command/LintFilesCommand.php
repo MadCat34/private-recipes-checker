@@ -1,0 +1,174 @@
+<?php
+
+/*
+ * (c) 2026 madcat34
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
+
+namespace App\Command;
+
+use App\ErrorReporter\ErrorReporter;
+use Symfony\Component\Console\Attribute\AsCommand;
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Finder\Finder;
+
+#[AsCommand(name: 'lint:files', description: 'Validates file-level conventions (indentation, extensions, newlines, ...)')]
+final class LintFilesCommand extends Command
+{
+    public function __construct(private ErrorReporter $errorReporter, private ?string $baseDir = null)
+    {
+        parent::__construct();
+    }
+
+    protected function execute(InputInterface $input, OutputInterface $output): int
+    {
+        $baseDir = $this->baseDir ?? getcwd();
+
+        $hasErrors = false;
+        $hasErrors = $this->checkNoSymlinks($baseDir) || $hasErrors;
+        $hasErrors = $this->checkNoYmlExtension($baseDir) || $hasErrors;
+        $hasErrors = $this->checkNoGitkeep($baseDir) || $hasErrors;
+        $hasErrors = $this->checkIndentation($baseDir) || $hasErrors;
+        $hasErrors = $this->checkTrailingNewline($baseDir) || $hasErrors;
+        $hasErrors = $this->checkHttpsForSymfonyCom($baseDir) || $hasErrors;
+        $hasErrors = $this->checkUnderscoreNotationUnderConfig($baseDir) || $hasErrors;
+        $hasErrors = $this->checkNoTildeNulls($baseDir) || $hasErrors;
+        $hasErrors = $this->checkNoConsoleInMakefile($baseDir) || $hasErrors;
+
+        $this->errorReporter->flush($this->getName());
+
+        return $hasErrors ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    private function checkNoSymlinks(string $baseDir): bool
+    {
+        $hasErrors = false;
+        foreach ((new Finder())->in($baseDir) as $fileInfo) {
+            if (is_link($fileInfo->getPathname())) {
+                $this->errorReporter->reportError('Symlinks are not allowed', $fileInfo->getRelativePathname());
+                $hasErrors = true;
+            }
+        }
+
+        return $hasErrors;
+    }
+
+    private function checkNoYmlExtension(string $baseDir): bool
+    {
+        $hasErrors = false;
+        foreach ((new Finder())->in($baseDir)->files()->name('*.yml') as $file) {
+            $this->errorReporter->reportError('*.yaml files should be used instead of *.yml', $file->getRelativePathname());
+            $hasErrors = true;
+        }
+
+        return $hasErrors;
+    }
+
+    private function checkNoGitkeep(string $baseDir): bool
+    {
+        $hasErrors = false;
+        foreach ((new Finder())->in($baseDir)->ignoreDotFiles(false)->files()->name('.gitkeep') as $file) {
+            $this->errorReporter->reportError('.gitkeep files should be renamed to .gitignore', $file->getRelativePathname());
+            $hasErrors = true;
+        }
+
+        return $hasErrors;
+    }
+
+    private function checkIndentation(string $baseDir): bool
+    {
+        $hasErrors = false;
+        foreach ((new Finder())->in($baseDir)->files()->name(['*.yaml', '*.json']) as $file) {
+            foreach (explode("\n", $file->getContents()) as $i => $line) {
+                if (!preg_match('/^((    )*[^ \t]|$)/', $line)) {
+                    $this->errorReporter->reportError('Indentation must be a multiple of 4 spaces', $file->getRelativePathname(), $i + 1);
+                    $hasErrors = true;
+                }
+            }
+        }
+
+        return $hasErrors;
+    }
+
+    private function checkTrailingNewline(string $baseDir): bool
+    {
+        $hasErrors = false;
+        $extensions = ['*.yaml', '*.yml', '*.txt', '*.md', '*.markdown', '*.json', '*.rst', '*.php', '*.js', '*.css', '*.twig'];
+        foreach ((new Finder())->in($baseDir)->files()->name($extensions) as $file) {
+            $contents = $file->getContents();
+            if ('' !== $contents && "\n" !== substr($contents, -1)) {
+                $line = substr_count($contents, "\n") + 1;
+                $this->errorReporter->reportError('Should end with a newline', $file->getRelativePathname(), $line);
+                $hasErrors = true;
+            }
+        }
+
+        return $hasErrors;
+    }
+
+    private function checkHttpsForSymfonyCom(string $baseDir): bool
+    {
+        $hasErrors = false;
+        foreach ((new Finder())->in($baseDir)->files() as $file) {
+            foreach (explode("\n", $file->getContents()) as $i => $line) {
+                if (preg_match('{http://.*symfony\.com}', $line)) {
+                    $this->errorReporter->reportError('Use https when referencing symfony.com', $file->getRelativePathname(), $i + 1);
+                    $hasErrors = true;
+                }
+            }
+        }
+
+        return $hasErrors;
+    }
+
+    private function checkUnderscoreNotationUnderConfig(string $baseDir): bool
+    {
+        $hasErrors = false;
+        foreach ((new Finder())->in($baseDir)->files() as $file) {
+            $relative = $file->getRelativePathname();
+            if (!preg_match('{^[^/]+/[^/]+/[^/]+/config/}', $relative)) {
+                continue;
+            }
+            if (!preg_match('{^[^/]+/[^/]+/[^/]+/config/[0-9a-z_./]+$}', $relative)) {
+                $this->errorReporter->reportError('Underscore notation is required for file and directory names under config/', $relative);
+                $hasErrors = true;
+            }
+        }
+
+        return $hasErrors;
+    }
+
+    private function checkNoTildeNulls(string $baseDir): bool
+    {
+        $hasErrors = false;
+        foreach ((new Finder())->in($baseDir)->files()->name(['*.yaml', '*.yml']) as $file) {
+            foreach (explode("\n", $file->getContents()) as $i => $line) {
+                if (str_contains($line, ': ~')) {
+                    $this->errorReporter->reportError('"~" should be replaced with "null"', $file->getRelativePathname(), $i + 1);
+                    $hasErrors = true;
+                }
+            }
+        }
+
+        return $hasErrors;
+    }
+
+    private function checkNoConsoleInMakefile(string $baseDir): bool
+    {
+        $hasErrors = false;
+        foreach ((new Finder())->in($baseDir)->files()->name('Makefile') as $file) {
+            foreach (explode("\n", $file->getContents()) as $i => $line) {
+                if (preg_match('{bin/console|\$\(CONSOLE\)}', $line)) {
+                    $this->errorReporter->reportError('Symfony commands should not be wrapped in a Makefile', $file->getRelativePathname(), $i + 1);
+                    $hasErrors = true;
+                }
+            }
+        }
+
+        return $hasErrors;
+    }
+}
