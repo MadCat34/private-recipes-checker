@@ -12,28 +12,33 @@
 
 namespace App\Command;
 
+use App\Registry\PackageRegistryProvider;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 #[AsCommand(name: 'generate:recipes-readme', description: 'Generates a "README" containing a list of all recipes.')]
 class GenerateRecipesReadmeCommand extends Command
 {
+    private const DEFAULT_HEADER = "# List of Recipes\n";
+
+    public function __construct(
+        private PackageRegistryProvider $registryProvider,
+        private ?string $headerOverride = null,
+    ) {
+        parent::__construct();
+    }
+
     protected function configure(): void
     {
-        $this
-            ->addArgument('index_path', InputArgument::REQUIRED, 'Path to the local index.json')
-            ->addOption('contrib', null, InputOption::VALUE_NONE, 'Is this the contrib repository?')
-        ;
+        $this->addArgument('index_path', InputArgument::REQUIRED, 'Path to the local index.json');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $indexPath = $input->getArgument('index_path');
-        $isContrib = $input->getOption('contrib');
 
         if (!file_exists($indexPath)) {
             throw new \InvalidArgumentException(sprintf('Cannot find index JSON file "%s".', $indexPath));
@@ -44,23 +49,23 @@ class GenerateRecipesReadmeCommand extends Command
         $aliases = $this->organizeAliases($data['aliases']);
         $hasAliases = count($aliases) > 0;
 
-        $contentLines = [];
-        $contentLines[] = '# List of Recipes';
-        $contentLines[] = '';
-        if ($isContrib) {
-            $contentLines[] = 'Additional recipes can be found on the [Main Recipes Repository](https://github.com/symfony/recipes/blob/flex/main/RECIPES.md)';
-        } else {
-            $contentLines[] = 'Additional recipes can be found on the [Contrib Recipes Repository](https://github.com/symfony/recipes-contrib/blob/flex/main/RECIPES.md)';
-        }
+        $contentLines = explode("\n", rtrim($this->headerOverride ?? self::DEFAULT_HEADER, "\n"));
         $contentLines[] = '';
 
         // Package | Latest recipe | Aliases
-        // [symfony/framework-bundle](https://packagist) | [5.4](github.com/.../) | framework-bundle
+        // [acme/private-bundle](https://packagist) | [1.0](../../../tree/main/.../1.0) | acme
         $contentLines[] = '| Package | Latest Recipe |'.($hasAliases ? ' Aliases |' : '');
         $contentLines[] = '| --- | --- |'.($hasAliases ? ' --- |' : '');
         foreach ($data['recipes'] as $package => $versions) {
             $latestVersion = array_pop($versions);
-            $line = sprintf('| [%s](https://packagist.org/packages/%s) | [%s](../../../tree/main/%s/%s) |', $package, $package, $latestVersion, $package, $latestVersion);
+            $line = sprintf(
+                '| [%s](%s) | [%s](../../../tree/main/%s/%s) |',
+                $package,
+                $this->registryProvider->getPackageBrowseUrl($package),
+                $latestVersion,
+                $package,
+                $latestVersion
+            );
             if ($hasAliases) {
                 $styledAliases = array_map(function ($alias) {
                     return sprintf('`%s`', $alias);
@@ -71,9 +76,9 @@ class GenerateRecipesReadmeCommand extends Command
             $contentLines[] = $line;
         }
 
-        echo implode("\n", $contentLines);
+        $output->write(implode("\n", $contentLines));
 
-        return 0;
+        return Command::SUCCESS;
     }
 
     private function organizeAliases(array $aliases): array
