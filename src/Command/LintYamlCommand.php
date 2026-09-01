@@ -12,6 +12,7 @@
 
 namespace App\Command;
 
+use App\ErrorReporter\ErrorReporter;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -23,19 +24,29 @@ use Symfony\Component\Yaml\Yaml;
 #[AsCommand(name: 'lint:yaml', description: 'Validates the content of yaml files')]
 class LintYamlCommand extends Command
 {
-    protected function execute(InputInterface $input, OutputInterface $output): int
-    {
-        $exit = 0;
-
-        while (false !== $file = fgets(\STDIN)) {
-            $file = substr($file, 0, -1);
-            $this->validate($file, $output, $exit);
-        }
-
-        return $exit;
+    /** @param resource $inputStream defaults to real stdin; overridable so tests can inject a fake stream */
+    public function __construct(
+        private ErrorReporter $errorReporter,
+        private $inputStream = \STDIN,
+    ) {
+        parent::__construct();
     }
 
-    private function validate(string $file, OutputInterface $output, int &$exit)
+    protected function execute(InputInterface $input, OutputInterface $output): int
+    {
+        $hasErrors = false;
+
+        while (false !== $file = fgets($this->inputStream)) {
+            $file = substr($file, 0, -1);
+            $hasErrors = $this->validate($file) || $hasErrors;
+        }
+
+        $this->errorReporter->flush($this->getName());
+
+        return $hasErrors ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    private function validate(string $file): bool
     {
         $parser = new Parser();
         $content = file_get_contents($file);
@@ -51,44 +62,42 @@ class LintYamlCommand extends Command
         try {
             $data = $parser->parse($content, Yaml::PARSE_CONSTANT | Yaml::PARSE_CUSTOM_TAGS);
         } catch (ParseException $e) {
-            $output->writeln(sprintf('::error file=%s,line=%s::%s', $file, $e->getParsedLine(), $e->getMessage()));
-            $exit = 1;
+            $this->errorReporter->reportError($e->getMessage(), $file, $e->getParsedLine());
 
-            return;
+            return true;
         } finally {
             restore_error_handler();
         }
 
         if (null === $data || !preg_match('{^[^/]+/[^/]+/[^/]+/config/packages/}', $file)) {
-            return;
+            return false;
         }
 
         if (!\is_array($data)) {
-            $output->writeln(sprintf('::error file=%s::A configuration array is expected', $file));
-            $exit = 1;
+            $this->errorReporter->reportError('A configuration array is expected', $file);
 
-            return;
+            return true;
         }
 
+        $hasErrors = false;
         foreach ($data as $k => $v) {
             if (!\in_array($v, ['', null, []], true)) {
                 continue;
             }
 
-            $v = preg_quote($k);
-            foreach (file($file) as $i => $line) {
-                if (preg_match("{^$v\s*:}", $line)) {
+            $quotedKey = preg_quote($k);
+            $line = null;
+            foreach (file($file) as $i => $fileLine) {
+                if (preg_match("{^$quotedKey\s*:}", $fileLine)) {
                     $line = 1 + $i;
                     break;
                 }
             }
 
-            if (\is_int($line)) {
-                $output->writeln(sprintf('::error file=%s,line=%s::"%s" entry should be removed as it is empty', $file, $line, $k));
-            } else {
-                $output->writeln(sprintf('::error file=%s::"%s" entry should be removed as it is empty', $file, $k));
-            }
-            $exit = 1;
+            $this->errorReporter->reportError(sprintf('"%s" entry should be removed as it is empty', $k), $file, $line);
+            $hasErrors = true;
         }
+
+        return $hasErrors;
     }
 }
