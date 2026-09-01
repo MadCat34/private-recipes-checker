@@ -7,25 +7,52 @@ use App\Command\DiffRecipeVersionsCommand;
 use App\Command\GenerateArchivedRecipesCommand;
 use App\Command\GenerateFlexEndpointCommand;
 use App\Command\GenerateRecipesReadmeCommand;
+use App\Command\LintFilesCommand;
 use App\Command\LintManifestsCommand;
 use App\Command\LintPackagesCommand;
 use App\Command\LintPullRequestCommand;
 use App\Command\LintYamlCommand;
 use App\Command\ListUnpatchedPackagesCommand;
+use App\Manifest\ManifestValidator;
+use App\Registry\PackageRegistryProviderResolver;
+use App\Registry\UnavailableRegistryProvider;
+use App\Vcs\VcsProviderResolver;
 use Symfony\Component\Console\Application;
+use Symfony\Component\Yaml\Yaml;
 
-return function() {
+return function () {
+    // --- resolve, once ---
+    $vcsProvider = (new VcsProviderResolver())->resolve($_SERVER + $_ENV);
+    $errorReporter = $vcsProvider->createErrorReporter();
+
+    $configFile = getcwd().'/.recipes-checker.yaml';
+
+    // A broken config must not prevent `./run list` or `./run --help` from answering: the error
+    // is carried by a provider that rethrows it on first real use.
+    try {
+        $config = is_file($configFile) ? Yaml::parseFile($configFile) : [];
+        $registryProvider = (new PackageRegistryProviderResolver())->resolve($config['registry'] ?? []);
+    } catch (\Throwable $e) {
+        $config = [];
+        $registryProvider = new UnavailableRegistryProvider($e);
+    }
+
+    $readmeHeader = $config['readme']['header'] ?? null;
+    $manifestValidator = new ManifestValidator(__DIR__.'/resources/manifest.schema.json');
+
+    // --- inject into commands ---
     $app = new Application();
 
     $app->addCommand(new DiffRecipeVersionsCommand());
-    $app->addCommand(new GenerateFlexEndpointCommand());
     $app->addCommand(new GenerateArchivedRecipesCommand());
-    $app->addCommand(new GenerateRecipesReadmeCommand());
-    $app->addCommand(new LintManifestsCommand());
-    $app->addCommand(new LintPackagesCommand());
-    $app->addCommand(new LintPullRequestCommand());
-    $app->addCommand(new LintYamlCommand());
-    $app->addCommand(new ListUnpatchedPackagesCommand());
+    $app->addCommand(new GenerateFlexEndpointCommand($vcsProvider));
+    $app->addCommand(new GenerateRecipesReadmeCommand($registryProvider, $readmeHeader));
+    $app->addCommand(new LintFilesCommand($errorReporter));
+    $app->addCommand(new LintManifestsCommand($errorReporter, $manifestValidator));
+    $app->addCommand(new LintPackagesCommand($registryProvider, $errorReporter));
+    $app->addCommand(new LintPullRequestCommand($vcsProvider, $errorReporter));
+    $app->addCommand(new LintYamlCommand($errorReporter));
+    $app->addCommand(new ListUnpatchedPackagesCommand($vcsProvider));
 
     return $app;
 };
