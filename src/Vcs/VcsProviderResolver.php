@@ -14,6 +14,7 @@ final class VcsProviderResolver
     /** @var list<class-string<VcsProvider>> */
     public const DEFAULT_PROVIDERS = [
         GitHubProvider::class,
+        GitLabProvider::class,
     ];
 
     /** @param list<class-string<VcsProvider>> $providers injectable for tests */
