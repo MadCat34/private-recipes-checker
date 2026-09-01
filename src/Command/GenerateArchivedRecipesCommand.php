@@ -5,9 +5,12 @@
  *
  * For the full copyright and license information, please view the LICENSE
  * file that was distributed with this source code.
+ *
+ * Modified by madcat34 for the Private Recipe Checker fork, 2026.
+ * See CHANGELOG.md and the git history for details.
  */
 
-namespace App;
+namespace App\Command;
 
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -21,6 +24,11 @@ use Symfony\Component\Process\Process;
 #[AsCommand(name: 'generate:archived-recipes', description: 'Generates an "archived" directory containing the history of every recipe.')]
 class GenerateArchivedRecipesCommand extends Command
 {
+    public function __construct(private ?string $checkerRoot = null)
+    {
+        parent::__construct();
+    }
+
     protected function configure(): void
     {
         $this
@@ -35,6 +43,7 @@ class GenerateArchivedRecipesCommand extends Command
         $recipesDirectory = $input->getArgument('directory');
         $branch = $input->getArgument('branch');
         $outputDir = $input->getArgument('output_directory');
+        $checkerRoot = $this->checkerRoot ?? realpath(__DIR__.'/../..');
         $filesystem = new Filesystem();
 
         if (!file_exists($recipesDirectory)) {
@@ -57,7 +66,7 @@ class GenerateArchivedRecipesCommand extends Command
         while (true) {
             // most arguments to the command do not matter for us and so are hardcoded
             $process = Process::fromShellCommandline(
-                sprintf('git ls-tree HEAD */*/* | php %s/run generate:flex-endpoint symfony/recipes master flex/main $OUTPUT_DIR', realpath(__DIR__.'/../')),
+                sprintf('git ls-tree HEAD */*/* | php %s/run generate:flex-endpoint symfony/recipes master flex/main $OUTPUT_DIR', $checkerRoot),
                 $recipesDirectory
             );
             // this WILL occasionally fail: some legacy recipes were invalid and pointed to non-existent files

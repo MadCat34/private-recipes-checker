@@ -3,15 +3,15 @@
 
 require __DIR__.'/vendor/autoload_runtime.php';
 
-use App\DiffRecipeVersionsCommand;
-use App\GenerateArchivedRecipesCommand;
-use App\GenerateFlexEndpointCommand;
-use App\GenerateRecipesReadmeCommand;
-use App\LintManifestsCommand;
-use App\LintPackagesCommand;
-use App\LintPullRequestCommand;
-use App\LintYamlCommand;
-use App\ListUnpatchedPackagesCommand;
+use App\Command\DiffRecipeVersionsCommand;
+use App\Command\GenerateArchivedRecipesCommand;
+use App\Command\GenerateFlexEndpointCommand;
+use App\Command\GenerateRecipesReadmeCommand;
+use App\Command\LintManifestsCommand;
+use App\Command\LintPackagesCommand;
+use App\Command\LintPullRequestCommand;
+use App\Command\LintYamlCommand;
+use App\Command\ListUnpatchedPackagesCommand;
 use Symfony\Component\Console\Application;
 
 return function() {

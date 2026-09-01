@@ -5,9 +5,12 @@
  *
  * For the full copyright and license information, please view the LICENSE
  * file that was distributed with this source code.
+ *
+ * Modified by madcat34 for the Private Recipe Checker fork, 2026.
+ * See CHANGELOG.md and the git history for details.
  */
 
-namespace App;
+namespace App\Command;
 
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
