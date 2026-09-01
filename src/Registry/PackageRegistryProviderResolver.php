@@ -14,6 +14,7 @@ final class PackageRegistryProviderResolver
     /** @var array<string, class-string<PackageRegistryProvider>> */
     public const DEFAULT_PROVIDERS = [
         'packagist' => PackagistProvider::class,
+        'artifactory' => ArtifactoryProvider::class,
     ];
 
     /** @param array<string, class-string<PackageRegistryProvider>> $providers injectable for tests */
