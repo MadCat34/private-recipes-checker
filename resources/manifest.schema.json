@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Symfony Flex recipe manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "bundles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "enum": ["all", "dev", "prod", "test"] },
+        "minItems": 1
+      }
+    },
+    "container": {
+      "type": "object"
+    },
+    "copy-from-recipe": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "copy-from-package": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "composer-scripts": {
+      "type": "object",
+      "additionalProperties": { "enum": ["php-script", "script", "symfony-cmd"] }
+    },
+    "composer-commands": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "dotenv": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "type": "string" }
+      }
+    },
+    "gitignore": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "makefile": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "post-install-output": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "aliases": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "conflict": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "dockerfile": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "docker-compose": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "add-lines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "content", "position"],
+        "properties": {
+          "file": { "type": "string" },
+          "content": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          },
+          "position": { "enum": ["top", "bottom", "after_target"] },
+          "target": { "type": "string" },
+          "warn_if_missing": { "type": "boolean" },
+          "requires": { "type": "string" }
+        },
+        "if": {
+          "properties": { "position": { "const": "after_target" } }
+        },
+        "then": {
+          "required": ["target"]
+        }
+      }
+    }
+  }
+}
