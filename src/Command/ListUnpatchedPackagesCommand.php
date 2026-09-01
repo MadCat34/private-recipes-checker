@@ -12,39 +12,29 @@
 
 namespace App\Command;
 
+use App\Vcs\VcsProvider;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\HttpClient\HttpClient;
 
-#[AsCommand(name: 'list-unpatched-packages', description: 'Lists packages that are *not* patched by the PR')]
+#[AsCommand(name: 'list-unpatched-packages', description: 'Lists packages that are *not* patched by the PR/MR')]
 class ListUnpatchedPackagesCommand extends Command
 {
-    protected function configure(): void
+    public function __construct(private VcsProvider $vcsProvider)
     {
-        $this
-            ->addArgument('event_path', InputArgument::REQUIRED, 'The path where the GitHub event is stored')
-            ->addArgument('github_token', InputArgument::REQUIRED, 'The GitHub API token to use')
-        ;
+        parent::__construct();
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $data = json_decode(file_get_contents($input->getArgument('event_path')), true);
-
-        $client = HttpClient::create();
-        $diff = $client->request('GET', $data['pull_request']['url'],
-            [
-                'auth_bearer' => $input->getArgument('github_token'),
-                'headers' => ['Accept' => 'application/vnd.github.v3.diff'],
-            ]
-        )->getContent();
-
-        preg_match_all('{^diff --git a/(([^/]++/[^/]++)/.*) b/\1$}m', $diff, $matches, \PREG_PATTERN_ORDER);
-
-        $patchedPackages = array_flip($matches[2]);
+        $patchedPackages = [];
+        foreach ($this->vcsProvider->getChangedFiles() as $file) {
+            $parts = explode('/', $file, 3);
+            if (\count($parts) >= 2) {
+                $patchedPackages[$parts[0].'/'.$parts[1]] = true;
+            }
+        }
 
         foreach (glob('*/*') as $package) {
             if (!isset($patchedPackages[$package])) {
@@ -52,6 +42,6 @@ class ListUnpatchedPackagesCommand extends Command
             }
         }
 
-        return 0;
+        return Command::SUCCESS;
     }
 }
