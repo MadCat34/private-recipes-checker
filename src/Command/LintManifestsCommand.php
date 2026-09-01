@@ -12,6 +12,8 @@
 
 namespace App\Command;
 
+use App\ErrorReporter\ErrorReporter;
+use App\Manifest\ManifestValidator;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -20,11 +22,18 @@ use Symfony\Component\Console\Output\OutputInterface;
 #[AsCommand(name: 'lint:manifests', description: 'Checks manifest.json files')]
 class LintManifestsCommand extends Command
 {
-    private const ALLOWED_KEYS = [
+    /**
+     * Used only to decide whether a recipe is "empty" (not worth keeping) — not for structural
+     * validation, which is delegated entirely to ManifestValidator/resources/manifest.schema.json.
+     * "bundles" needs more than one entry to count as meaningful content on its own; every other
+     * key just needs to be non-empty.
+     */
+    private const EMPTY_CHECK_KEYS = [
         'bundles' => 1,
         'copy-from-recipe' => 0,
         'copy-from-package' => 0,
         'composer-scripts' => 0,
+        'composer-commands' => 0,
         'dotenv' => 0,
         'env' => 0,
         'makefile' => 0,
@@ -40,67 +49,52 @@ class LintManifestsCommand extends Command
 
     private const SPECIAL_FILES = ['.', '..', 'manifest.json', 'post-install.txt', 'Makefile'];
 
-    protected function configure(): void
-    {
-        $this
-            ->addOption('contrib')
-        ;
+    public function __construct(
+        private ErrorReporter $errorReporter,
+        private ManifestValidator $manifestValidator,
+    ) {
+        parent::__construct();
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $exit = 0;
+        $hasErrors = false;
         $aliases = [];
 
         foreach (glob('*/*/*/manifest.json') as $manifest) {
             [$vendor, $package, $version] = explode('/', $manifest);
             $package = "$vendor/$package";
-            $data = json_decode(file_get_contents($manifest), true);
+            $manifestJson = file_get_contents($manifest);
+            $data = json_decode($manifestJson, true);
+
+            foreach ($this->manifestValidator->validate($manifestJson) as $schemaError) {
+                $this->errorReporter->reportError($schemaError, $manifest);
+                $hasErrors = true;
+            }
 
             $empty = true;
-            foreach (self::ALLOWED_KEYS as $key => $count) {
+            foreach (self::EMPTY_CHECK_KEYS as $key => $count) {
                 if ($count ? \count($data[$key] ?? []) > $count : !empty($data[$key])) {
                     $empty = false;
                     break;
                 }
             }
-            if ($empty && !is_file("$package/$version/post-install.txt") && 'all' === current($data['bundles'] ?? [])) {
-                $output->writeln(sprintf('::error file=%s::Recipe is not needed as it only registers a bundle for all environments', $manifest));
+            if ($empty && !is_file("$package/$version/post-install.txt") && ['all'] === current($data['bundles'] ?? [])) {
+                $this->errorReporter->reportError('Recipe is not needed as it only registers a bundle for all environments', $manifest);
                 continue;
             }
 
-            if (!isset($data['aliases'])) {
-                // no-op
-            } elseif ($input->getOption('contrib')) {
-                $output->writeln(sprintf('::error file=%s::Aliases not supported in the contrib repository', $manifest));
-                $exit = 1;
-            } else {
-                foreach ($data['aliases'] as $alias) {
-                    if (\in_array($aliases, ['lock', 'nothing', 'mirrors', ''], true)) {
-                        $output->writeln(sprintf('::error file=%s::Alias "%s" cannot be used as it\'s a special alias used by Composer', $manifest, $alias));
-                        $exit = 1;
-                    }
-                    if (isset($aliases[$alias]) && $package !== $aliases[$alias]) {
-                        $output->writeln(sprintf('::error file=%s::Alias "%s" also defined for "%s"', $manifest, $alias, $aliases[$alias]));
-                        $exit = 1;
-                    } else {
-                        $aliases[$alias] = $package;
-                    }
+            foreach ($data['aliases'] ?? [] as $alias) {
+                if (\in_array($alias, ['lock', 'nothing', 'mirrors', ''], true)) {
+                    $this->errorReporter->reportError(sprintf('Alias "%s" cannot be used as it\'s a special alias used by Composer', $alias), $manifest);
+                    $hasErrors = true;
                 }
-            }
-
-            if (isset($data['add-lines'])) {
-                if (!$this->isAddLinesValid($data['add-lines'], $manifest, $output)) {
-                    $exit = 1;
+                if (isset($aliases[$alias]) && $package !== $aliases[$alias]) {
+                    $this->errorReporter->reportError(sprintf('Alias "%s" also defined for "%s"', $alias, $aliases[$alias]), $manifest);
+                    $hasErrors = true;
+                } else {
+                    $aliases[$alias] = $package;
                 }
-            }
-
-            if ($extraKeys = array_diff_key($data, self::ALLOWED_KEYS)) {
-                $extraKeys = array_keys($extraKeys);
-                $lastKey = array_pop($extraKeys);
-                $extraKeys = $extraKeys ? 's: '.implode('", "', $extraKeys).' and' : ':';
-                $output->writeln(sprintf('::error file=%s::Unsupported key%s "%s"', $manifest, $extraKeys, $lastKey));
-                $exit = 1;
             }
 
             foreach (scandir("$package/$version") as $file) {
@@ -108,8 +102,8 @@ class LintManifestsCommand extends Command
 
                 if (\in_array($file, self::SPECIAL_FILES, true)) {
                     if (is_file($path) && !preg_match('//u', file_get_contents($path))) {
-                        $output->writeln(sprintf('::error file=%s::File "%s" must be UTF-8 encoded', $path, $file));
-                        $exit = 1;
+                        $this->errorReporter->reportError(sprintf('File "%s" must be UTF-8 encoded', $file), $path);
+                        $hasErrors = true;
                     }
                     continue;
                 }
@@ -118,86 +112,21 @@ class LintManifestsCommand extends Command
                     if (isset($data['copy-from-recipe'][$file.'/'])) {
                         // no-op
                     } elseif (isset($data['copy-from-recipe'][$file])) {
-                        $output->writeln(sprintf('::error file=%s::Directory must be listed under "%s/" in the "copy-from-recipe" section', $manifest, $file));
-                        $exit = 1;
+                        $this->errorReporter->reportError(sprintf('Directory must be listed under "%s/" in the "copy-from-recipe" section', $file), $manifest);
+                        $hasErrors = true;
                     } else {
-                        $output->writeln(sprintf('::error file=%s::Directory must be listed under "%s/" in the "copy-from-recipe" section of "manifest.json"', $path, $file));
-                        $exit = 1;
+                        $this->errorReporter->reportError(sprintf('Directory must be listed under "%s/" in the "copy-from-recipe" section of "manifest.json"', $file), $path);
+                        $hasErrors = true;
                     }
                 } elseif (!isset($data['copy-from-recipe'][$file])) {
-                    $output->writeln(sprintf('::error file=%s::File must be listed in the "copy-from-recipe" section of "manifest.json"', $path));
-                    $exit = 1;
+                    $this->errorReporter->reportError('File must be listed in the "copy-from-recipe" section of "manifest.json"', $path);
+                    $hasErrors = true;
                 }
             }
         }
 
-        return $exit;
-    }
+        $this->errorReporter->flush($this->getName());
 
-    private function isAddLinesValid(mixed $data, string $manifest, OutputInterface $output)
-    {
-        if (!is_array($data)) {
-            $output->writeln(sprintf('::error file=%s::"add-lines" must be an array', $manifest));
-
-            return false;
-        }
-
-        $isValid = true;
-        foreach ($data as $index => $addLine) {
-            foreach (['file', 'content', 'position'] as $key) {
-                if (!isset($addLine[$key])) {
-                    $output->writeln(sprintf('::error file=%s::"add-lines" (index %d) must have a "%s" key', $manifest, $index, $key));
-                    $isValid = false;
-
-                    continue;
-                }
-
-                if ('content' === $key) {
-                    if (!is_string($addLine[$key]) && !is_array($addLine[$key])) {
-                        $output->writeln(sprintf('::error file=%s::"add-lines" (index %d) has a "%s" key but it must be a string or an array of strings', $manifest, $index, $key));
-                        $isValid = false;
-                        
-                        continue;
-                    }
-
-                    if (is_array($addLine[$key])) {
-                        foreach ($addLine[$key] as $lineIndex => $line) {
-                            if (!is_string($line)) {
-                                $output->writeln(sprintf('::error file=%s::"add-lines" (index %d) has a "%s" array but element at index %d is not a string', $manifest, $index, $key, $lineIndex));
-                                
-                                $isValid = false;
-                            }
-                        }
-                    }
-                } elseif (!is_string($addLine[$key])) {
-                    $output->writeln(sprintf('::error file=%s::"add-lines" (index %d) has a "%s" key but it must be a string value', $manifest, $index, $key));
-
-                    $isValid = false;
-                }
-            }
-
-            if (isset($addLine['position'])) {
-                $validPositions = ['top', 'bottom', 'after_target'];
-                if (!\in_array($addLine['position'], $validPositions, true)) {
-                    $output->writeln(sprintf('::error file=%s::"add-lines" (index %d) must have a "position" key with one of the following values: "%s"', $manifest, $index, implode('", "', $validPositions)));
-
-                    $isValid = false;
-                }
-
-                if ('after_target' === $addLine['position']) {
-                    if (!isset($addLine['target'])) {
-                        $output->writeln(sprintf('::error file=%s::"add-lines" (index %d) must have a "target" key when "position" is "after_target"', $manifest, $index));
-
-                        $isValid = false;
-                    } elseif (!is_string($addLine['target'])) {
-                        $output->writeln(sprintf('::error file=%s::"add-lines" (index %d) has a "target" key but it must be a string value', $manifest, $index));
-
-                        $isValid = false;
-                    }
-                }
-            }
-        }
-
-        return $isValid;
+        return $hasErrors ? Command::FAILURE : Command::SUCCESS;
     }
 }
