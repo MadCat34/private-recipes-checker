@@ -12,48 +12,49 @@
 
 namespace App\Command;
 
+use App\ErrorReporter\ErrorReporter;
+use App\Vcs\VcsProvider;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\HttpClient\HttpClient;
 
-#[AsCommand(name: 'lint:pull-request', description: 'Ensures the PR can be accepted')]
+#[AsCommand(name: 'lint:pull-request', description: 'Ensures the PR/MR can be accepted')]
 class LintPullRequestCommand extends Command
 {
+    public function __construct(
+        private VcsProvider $vcsProvider,
+        private ErrorReporter $errorReporter,
+    ) {
+        parent::__construct();
+    }
+
     protected function configure(): void
     {
-        $this
-            ->addArgument('event_path', InputArgument::REQUIRED, 'The path where the GitHub event is stored')
-            ->addArgument('github_token', InputArgument::REQUIRED, 'The GitHub API token to use')
-            ->addOption('license', null, InputOption::VALUE_REQUIRED, 'The license to be check in PR body')
-        ;
+        $this->addOption('license', null, InputOption::VALUE_REQUIRED, 'The license to check for in the PR/MR body');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $data = json_decode(file_get_contents($input->getArgument('event_path')), true);
-        $exit = 0;
+        $hasErrors = false;
 
         $license = $input->getOption('license');
-        if ($license && !preg_match('/^[ |\t]*License[ |\t]+'.preg_quote($license).'[ |\t]*\r?$/mi', $data['pull_request']['body'])) {
-            $output->writeln('::error::Contributions must be licensed under '.$license.' (add the pull request header in the description)');
-            $exit = 1;
+        if ($license && !preg_match('/^[ |\t]*License[ |\t]+'.preg_quote($license).'[ |\t]*\r?$/mi', $this->vcsProvider->getPullRequestBody())) {
+            $this->errorReporter->reportError('Contributions must be licensed under '.$license.' (add the pull request header in the description)');
+            $hasErrors = true;
         }
 
-        $client = HttpClient::create();
-        $commits = $client->request('GET', $data['pull_request']['commits_url'], ['auth_bearer' => $input->getArgument('github_token')]);
-
-        foreach ($commits->toArray() as $commit) {
-            if (1 < \count($commit['parents'])) {
-                $output->writeln('Pull requests should not have merge commits (please rebase)');
-                $exit = 1;
+        foreach ($this->vcsProvider->getPullRequestCommits() as $commit) {
+            if (1 < $commit['parent_count']) {
+                $this->errorReporter->reportError('Pull requests should not have merge commits (please rebase)');
+                $hasErrors = true;
                 break;
             }
         }
 
-        return $exit;
+        $this->errorReporter->flush($this->getName());
+
+        return $hasErrors ? Command::FAILURE : Command::SUCCESS;
     }
 }
