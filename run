@@ -17,15 +17,15 @@ use Symfony\Component\Console\Application;
 return function() {
     $app = new Application();
 
-    $app->add(new DiffRecipeVersionsCommand());
-    $app->add(new GenerateFlexEndpointCommand());
-    $app->add(new GenerateArchivedRecipesCommand());
-    $app->add(new GenerateRecipesReadmeCommand());
-    $app->add(new LintManifestsCommand());
-    $app->add(new LintPackagesCommand());
-    $app->add(new LintPullRequestCommand());
-    $app->add(new LintYamlCommand());
-    $app->add(new ListUnpatchedPackagesCommand());
+    $app->addCommand(new DiffRecipeVersionsCommand());
+    $app->addCommand(new GenerateFlexEndpointCommand());
+    $app->addCommand(new GenerateArchivedRecipesCommand());
+    $app->addCommand(new GenerateRecipesReadmeCommand());
+    $app->addCommand(new LintManifestsCommand());
+    $app->addCommand(new LintPackagesCommand());
+    $app->addCommand(new LintPullRequestCommand());
+    $app->addCommand(new LintYamlCommand());
+    $app->addCommand(new ListUnpatchedPackagesCommand());
 
     return $app;
 };
