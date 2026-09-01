@@ -12,7 +12,9 @@ namespace App\Vcs;
 final class VcsProviderResolver
 {
     /** @var list<class-string<VcsProvider>> */
-    public const DEFAULT_PROVIDERS = [];
+    public const DEFAULT_PROVIDERS = [
+        GitHubProvider::class,
+    ];
 
     /** @param list<class-string<VcsProvider>> $providers injectable for tests */
     public function __construct(private array $providers = self::DEFAULT_PROVIDERS)
