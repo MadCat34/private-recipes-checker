@@ -1,0 +1,14 @@
+name: Q&A
+
+on:
+    pull_request_target:
+
+defaults:
+    run:
+        shell: bash
+
+jobs:
+    call-qa:
+        uses: ./.github/workflows/callable-qa.yml
+        secrets:
+            token: ${{ secrets.VCS_TOKEN }}

@@ -1,0 +1,176 @@
+name: Q&A
+
+on:
+    workflow_call:
+        inputs:
+            branch:
+                default: main
+                required: false
+                type: string
+            checker_ref:
+                description: 'madcat34/private-recipe-checker git ref to use — pin to a tagged release once you have picked one'
+                default: main
+                required: false
+                type: string
+        secrets:
+            token:
+                required: true
+
+jobs:
+    run-checks:
+        name: Run checks
+        runs-on: ubuntu-latest
+        env:
+            VCS_TOKEN: ${{ secrets.token }}
+
+        steps:
+            -
+                name: Checkout
+                uses: actions/checkout@v4
+                id: checkout
+                with:
+                    fetch-depth: 0
+                    ref: 'refs/pull/${{ github.event.number }}/merge'
+                    allow-unsafe-pr-checkout: true
+
+            -
+                name: Install tools
+                run: |
+                    git config --global user.email ""
+                    git config --global user.name "github-action[bot]"
+                    cd .github
+                    rm -rf recipes-checker.zip recipes-checker-main
+                    wget -q -O recipes-checker.zip "https://codeload.github.com/madcat34/private-recipe-checker/zip/refs/heads/${{ inputs.checker_ref }}"
+                    unzip -q recipes-checker.zip
+                    mv private-recipe-checker-* recipes-checker-main
+                    cd recipes-checker-main
+                    composer install --ansi --no-dev
+
+            -
+                name: Check manifest.json files
+                if: "always() && steps.checkout.outcome == 'success'"
+                run: |
+                    .github/recipes-checker-main/run lint:manifests
+
+            -
+                name: Check file-level conventions
+                if: "always() && steps.checkout.outcome == 'success'"
+                run: |
+                    .github/recipes-checker-main/run lint:files
+
+            -
+                name: Remove non-patched packages
+                if: "always() && steps.checkout.outcome == 'success'"
+                run: |
+                    .github/recipes-checker-main/run list-unpatched-packages | xargs -r -n10 rm -rf
+
+            -
+                name: Generate Flex testing endpoint
+                if: "always() && steps.checkout.outcome == 'success' && github.base_ref == inputs.branch"
+                run: |
+                    mkdir .github/flex-endpoint
+                    git ls-tree HEAD */*/* | php .github/recipes-checker-main/run generate:flex-endpoint ${{ github.repository }} ${{ inputs.branch }} flex/pull-${{ github.event.number }} .github/flex-endpoint
+                    git stash
+                    git switch -c pr
+                    git switch --orphan flex/pull-${{ github.event.number }}
+                    git reset --hard -q
+                    mv .github/flex-endpoint/*.json .
+                    git add *.json
+                    git commit -m 'Create Flex endpoint' || true
+                    git config --local --unset-all http.https://github.com/.extraheader || true
+                    git push -f "https://x-access-token:${{ secrets.token }}@github.com/${{ github.repository }}" "flex/pull-${{ github.event.number }}"
+                    git switch pr
+                    git stash pop -q
+
+            -
+                name: Enable Automerge
+                if: "always() && steps.checkout.outcome == 'success'"
+                run: gh pr merge --auto --squash ${{ github.event.number }}
+                env:
+                    GITHUB_TOKEN: ${{ secrets.token }}
+
+            -
+                name: Compute diff between recipe versions
+                if: "always() && steps.checkout.outcome == 'success'"
+                run: |
+                    find * -mindepth 1 -maxdepth 1 -type d | sort \
+                        | .github/recipes-checker-main/run diff-recipe-versions 'https://raw.githubusercontent.com/${{ github.repository }}/flex/pull-${{ github.event.number }}/index.json' \
+                        > .github/diff-recipe-versions.md
+
+            -
+                name: Post diff between recipe versions
+                if: "always() && steps.checkout.outcome == 'success'"
+                uses: marocchino/sticky-pull-request-comment@v2
+                with:
+                    GITHUB_TOKEN: ${{ secrets.token }}
+                    path: .github/diff-recipe-versions.md
+
+            -
+                name: manifest.json is found
+                if: "always() && steps.checkout.outcome == 'success'"
+                run: |
+                    MISSING=$(find * -mindepth 2 -maxdepth 2 -type d '!' -exec test -f '{}/manifest.json' ';' -print)
+
+                    if [[ "" != "$MISSING" ]]; then echo -e "::error::Recipes must define a \"manifest.json\" file\nFile not found in $MISSING\n"; exit 1; fi
+
+            -
+                name: JSON files are valid
+                if: "always() && steps.checkout.outcome == 'success'"
+                run: |
+                    ERRORS=$(find * -name '*.json' | xargs -n1 -P0 bash -c 'ERR=$(cd / && python -mjson.tool '$(pwd)'/"$0" 2>&1 1> /dev/null) || echo \\n::error file="$0",line=`echo "${ERR#*: line }" | cut -d" " -f 1`::${ERR%%: line *}')
+
+                    if [[ "" != "$ERRORS" ]]; then echo -e "$ERRORS\n"; exit 1; fi
+
+            -
+                name: YAML files are valid
+                if: "always() && steps.checkout.outcome == 'success'"
+                run: |
+                    find * -name '*.yaml' | .github/recipes-checker-main/run lint:yaml
+
+            -
+                name: Packages exist in the configured registry
+                if: "always() && steps.checkout.outcome == 'success'"
+                run: |
+                    .github/recipes-checker-main/run lint:packages
+
+            -
+                name: Contribution has no merge commits
+                if: "always() && steps.checkout.outcome == 'success'"
+                run: |
+                    .github/recipes-checker-main/run lint:pull-request --license=MIT
+
+    create-project:
+        needs: run-checks
+        name: Run updated recipes
+        runs-on: ubuntu-latest
+
+        steps:
+            -
+                name: Export configuration
+                continue-on-error: true
+                id: config
+                run: |
+                    PACKAGES=$(curl -s https://raw.githubusercontent.com/${{ github.repository }}/flex/pull-${{ github.event.number }}/index.json | jq -r '.recipes | to_entries | map(.key+":^"+.value[-1]) | join(" ")')
+                    echo PACKAGES=$PACKAGES >> $GITHUB_ENV
+                    [[ "" != "$PACKAGES" ]]
+
+            -
+                name: Setup PHP
+                if: "always() && steps.config.outcome == 'success'"
+                uses: shivammathur/setup-php@v2
+                with:
+                    coverage: "none"
+                    php-version: "8.4"
+
+            -
+                name: Create-project with skeleton
+                if: "always() && steps.config.outcome == 'success'"
+                run: |
+                    set -x
+                    php -v
+                    composer create-project --ansi "symfony/skeleton" test-project
+                    cd test-project
+                    composer config extra.symfony.allow-contrib false
+                    composer config minimum-stability dev
+                    export SYMFONY_ENDPOINT=https://raw.githubusercontent.com/${{ github.repository }}/flex/pull-${{ github.event.number }}/index.json
+                    composer require -W --ansi $PACKAGES
