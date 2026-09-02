@@ -34,6 +34,10 @@ class LintPackagesCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        // Touch the registry provider even if no packages are found below, so a broken
+        // registry config (e.g. UnavailableRegistryProvider) still fails the command.
+        $this->registryProvider->getAuthHeaders();
+
         $packages = [];
 
         foreach (glob('*/*') as $package) {
