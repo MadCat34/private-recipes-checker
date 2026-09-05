@@ -124,6 +124,7 @@ class LintFilesCommandTest extends TestCase
 
     public function testAllowsUnderscoreNotationUnderConfig(): void
     {
+        $this->writeFixture('acme/private-bundle/1.0/manifest.json', "{}\n");
         $this->writeFixture('acme/private-bundle/1.0/config/packages/acme_bundle.yaml', "a: b\n");
 
         $reporter = new RecordingErrorReporter();
@@ -152,6 +153,51 @@ class LintFilesCommandTest extends TestCase
 
         $this->assertNotEmpty($reporter->errors);
         $this->assertStringContainsString('Makefile', $reporter->errors[0]['message']);
+    }
+
+    public function testRejectsMissingManifestJson(): void
+    {
+        $this->writeFixture('acme/private-bundle/1.0/config/packages/acme_bundle.yaml', "a: b\n");
+
+        $reporter = new RecordingErrorReporter();
+        (new CommandTester(new LintFilesCommand($reporter, $this->fixtureDir)))->execute([]);
+
+        $this->assertNotEmpty($reporter->errors);
+        $this->assertTrue($this->hasErrorContaining($reporter, 'manifest.json'));
+    }
+
+    public function testRejectsInvalidJson(): void
+    {
+        $this->writeFixture('a.json', '{ invalid');
+
+        $reporter = new RecordingErrorReporter();
+        (new CommandTester(new LintFilesCommand($reporter, $this->fixtureDir)))->execute([]);
+
+        $this->assertNotEmpty($reporter->errors);
+        $this->assertTrue($this->hasErrorContaining($reporter, 'JSON'));
+    }
+
+    public function testRejectsParametersKeyInPackagesConfig(): void
+    {
+        $this->writeFixture('acme/private-bundle/1.0/manifest.json', "{}\n");
+        $this->writeFixture('acme/private-bundle/1.0/config/packages/acme_bundle.yaml', "parameters:\n    foo: bar\n");
+
+        $reporter = new RecordingErrorReporter();
+        (new CommandTester(new LintFilesCommand($reporter, $this->fixtureDir)))->execute([]);
+
+        $this->assertNotEmpty($reporter->errors);
+        $this->assertTrue($this->hasErrorContaining($reporter, 'container'));
+    }
+
+    private function hasErrorContaining(RecordingErrorReporter $reporter, string $needle): bool
+    {
+        foreach ($reporter->errors as $error) {
+            if (str_contains($error['message'], $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function testDotDirectoriesLikeGithubAreIgnored(): void

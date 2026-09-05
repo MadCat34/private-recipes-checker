@@ -12,6 +12,11 @@ on:
                 default: main
                 required: false
                 type: string
+            license:
+                description: 'SPDX identifier required in the PR description (e.g. "MIT") — leave empty to skip the check'
+                default: ''
+                required: false
+                type: string
         secrets:
             token:
                 required: true
@@ -106,22 +111,6 @@ jobs:
                     path: .github/diff-recipe-versions.md
 
             -
-                name: manifest.json is found
-                if: "always() && steps.checkout.outcome == 'success'"
-                run: |
-                    MISSING=$(find * -mindepth 2 -maxdepth 2 -type d '!' -exec test -f '{}/manifest.json' ';' -print)
-
-                    if [[ "" != "$MISSING" ]]; then echo -e "::error::Recipes must define a \"manifest.json\" file\nFile not found in $MISSING\n"; exit 1; fi
-
-            -
-                name: JSON files are valid
-                if: "always() && steps.checkout.outcome == 'success'"
-                run: |
-                    ERRORS=$(find * -name '*.json' | xargs -n1 -P0 bash -c 'ERR=$(cd / && python -mjson.tool '$(pwd)'/"$0" 2>&1 1> /dev/null) || echo \\n::error file="$0",line=`echo "${ERR#*: line }" | cut -d" " -f 1`::${ERR%%: line *}')
-
-                    if [[ "" != "$ERRORS" ]]; then echo -e "$ERRORS\n"; exit 1; fi
-
-            -
                 name: YAML files are valid
                 if: "always() && steps.checkout.outcome == 'success'"
                 run: |
@@ -137,7 +126,7 @@ jobs:
                 name: Contribution has no merge commits
                 if: "always() && steps.checkout.outcome == 'success'"
                 run: |
-                    .github/recipes-checker-main/run lint:pull-request --license=MIT
+                    .github/recipes-checker-main/run lint:pull-request ${{ inputs.license && format('--license={0}', inputs.license) || '' }}
 
     create-project:
         needs: run-checks
