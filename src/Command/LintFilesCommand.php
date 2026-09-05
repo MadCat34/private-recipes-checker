@@ -38,6 +38,9 @@ final class LintFilesCommand extends Command
         $hasErrors = $this->checkUnderscoreNotationUnderConfig($baseDir) || $hasErrors;
         $hasErrors = $this->checkNoTildeNulls($baseDir) || $hasErrors;
         $hasErrors = $this->checkNoConsoleInMakefile($baseDir) || $hasErrors;
+        $hasErrors = $this->checkManifestJsonExists($baseDir) || $hasErrors;
+        $hasErrors = $this->checkJsonFilesAreValid($baseDir) || $hasErrors;
+        $hasErrors = $this->checkNoParametersKeyInPackagesConfig($baseDir) || $hasErrors;
 
         $this->errorReporter->flush($this->getName());
 
@@ -164,6 +167,51 @@ final class LintFilesCommand extends Command
             foreach (explode("\n", $file->getContents()) as $i => $line) {
                 if (preg_match('{bin/console|\$\(CONSOLE\)}', $line)) {
                     $this->errorReporter->reportError('Symfony commands should not be wrapped in a Makefile', $file->getRelativePathname(), $i + 1);
+                    $hasErrors = true;
+                }
+            }
+        }
+
+        return $hasErrors;
+    }
+
+    private function checkManifestJsonExists(string $baseDir): bool
+    {
+        $hasErrors = false;
+        foreach ((new Finder())->in($baseDir)->directories()->depth('== 2') as $dir) {
+            if (!is_file($dir->getPathname().'/manifest.json')) {
+                $this->errorReporter->reportError('Recipes must define a "manifest.json" file', $dir->getRelativePathname());
+                $hasErrors = true;
+            }
+        }
+
+        return $hasErrors;
+    }
+
+    private function checkJsonFilesAreValid(string $baseDir): bool
+    {
+        $hasErrors = false;
+        foreach ((new Finder())->in($baseDir)->files()->name('*.json') as $file) {
+            json_decode($file->getContents());
+            if (\JSON_ERROR_NONE !== json_last_error()) {
+                $this->errorReporter->reportError(sprintf('File is not valid JSON: %s', json_last_error_msg()), $file->getRelativePathname());
+                $hasErrors = true;
+            }
+        }
+
+        return $hasErrors;
+    }
+
+    private function checkNoParametersKeyInPackagesConfig(string $baseDir): bool
+    {
+        $hasErrors = false;
+        foreach ((new Finder())->in($baseDir)->files()->name(['*.yaml', '*.yml']) as $file) {
+            if (!preg_match('{^[^/]+/[^/]+/[^/]+/config/packages/}', $file->getRelativePathname())) {
+                continue;
+            }
+            foreach (explode("\n", $file->getContents()) as $i => $line) {
+                if (preg_match('{^parameters:}', $line)) {
+                    $this->errorReporter->reportError('"parameters" should be defined via the "container" configurator instead', $file->getRelativePathname(), $i + 1);
                     $hasErrors = true;
                 }
             }

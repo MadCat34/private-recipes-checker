@@ -1,12 +1,27 @@
+# Required CI/CD variables (Settings > CI/CD > Variables), not declared here since they're secrets:
+#   VCS_TOKEN — a bot personal access token with the "api" scope. CI_JOB_TOKEN is not enough:
+#               it cannot merge a merge request or post/edit notes on one.
+#
+# flex-cleanup needs a CI/CD schedule (Build > Pipeline schedules) targeting the default branch —
+# GitLab has no pipeline trigger equivalent to GitHub's "pull_request_target: types: [closed]",
+# so orphaned flex/mr-* branches are swept periodically instead of removed the instant a merge
+# request closes.
+
 stages:
     - qa
     - create-project
+    - flex-update
+    - flex-update-archived
+    - flex-cleanup
 
 variables:
     # Pin this to a tagged release once you've picked one — see this fork's README, "why it is
     # not expected to be upstreamed", reason #1: pulling an unversioned branch on every CI run is
     # the exact risk that section warns about.
     CHECKER_REF: main
+    # SPDX identifier your recipes must declare in the MR description (e.g. "MIT"). Leave empty
+    # to skip the license check entirely — lint:pull-request treats --license as optional.
+    REQUIRED_LICENSE: ""
 
 run-checks:
     stage: qa
@@ -14,12 +29,20 @@ run-checks:
     rules:
         - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     before_script:
-        - apk add --no-cache git curl
+        - apk add --no-cache git curl jq python3
         - git clone --branch "$CHECKER_REF" --depth 1 https://github.com/madcat34/private-recipe-checker.git .checker
         - (cd .checker && composer install --no-dev --ansi)
     script:
         - .checker/run lint:manifests
         - .checker/run lint:files
+        - find * -name '*.yaml' | .checker/run lint:yaml
+        - .checker/run lint:packages
+        - |
+            if [ -n "$REQUIRED_LICENSE" ]; then
+                .checker/run lint:pull-request --license="$REQUIRED_LICENSE"
+            else
+                .checker/run lint:pull-request
+            fi
         - .checker/run list-unpatched-packages | xargs -r -n10 rm -rf
         - |
             if [ "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" = "$CI_DEFAULT_BRANCH" ]; then
@@ -39,16 +62,30 @@ run-checks:
             fi
         - >
             curl --silent --request PUT --header "PRIVATE-TOKEN: ${VCS_TOKEN}"
-            "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/merge?merge_when_pipeline_succeeds=true"
+            "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/merge?merge_when_pipeline_succeeds=true&squash=true"
             || true
         - |
             find . -mindepth 1 -maxdepth 1 -type d ! -name '.git' ! -name '.checker' | sort \
                 | .checker/run diff-recipe-versions "${CI_SERVER_URL}/${CI_PROJECT_PATH}/-/raw/flex/mr-${CI_MERGE_REQUEST_IID}/index.json" \
                 > diff-recipe-versions.md
-        - >
-            curl --silent --request POST --header "PRIVATE-TOKEN: ${VCS_TOKEN}"
-            --data-urlencode "body@diff-recipe-versions.md"
-            "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
+        - |
+            # "Sticky" comment: update the existing note if one was already posted on this MR,
+            # instead of piling up a new one on every pipeline run (marocchino/sticky-pull-request
+            # -comment's behavior on the GitHub side).
+            MARKER='<!-- recipes-checker:diff-recipe-versions -->'
+            { echo "$MARKER"; cat diff-recipe-versions.md; } > note-body.md
+            NOTE_ID=$(curl --silent --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
+                "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes?per_page=100" \
+                | jq -r --arg marker "$MARKER" '[.[] | select(.body | startswith($marker))][0].id // empty')
+            if [ -n "$NOTE_ID" ]; then
+                curl --silent --request PUT --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
+                    --data-urlencode "body@note-body.md" \
+                    "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes/${NOTE_ID}"
+            else
+                curl --silent --request POST --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
+                    --data-urlencode "body@note-body.md" \
+                    "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
+            fi
     artifacts:
         when: always
         reports:
@@ -74,3 +111,77 @@ create-project:
         - composer config minimum-stability dev
         - export SYMFONY_ENDPOINT="${CI_SERVER_URL}/${CI_PROJECT_PATH}/-/raw/flex/mr-${CI_MERGE_REQUEST_IID}/index.json"
         - composer require -W --ansi $PACKAGES
+
+flex-update:
+    stage: flex-update
+    image: composer:2
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    before_script:
+        - apk add --no-cache git
+        - git clone --branch "$CHECKER_REF" --depth 1 https://github.com/madcat34/private-recipe-checker.git .checker
+        - (cd .checker && composer install --no-dev --ansi)
+        - git config --global user.email ""
+        - git config --global user.name "gitlab-ci"
+    script:
+        - |
+            mkdir flex-endpoint
+            git ls-tree HEAD */*/* | php .checker/run generate:flex-endpoint "$CI_PROJECT_PATH" "$CI_DEFAULT_BRANCH" flex/main flex-endpoint
+            git fetch origin flex/main
+            git switch flex/main
+            git rm -q *.json
+            mv flex-endpoint/*.json .
+            git add ./*.json
+            cp -a flex-endpoint/archived .
+            git add archived/
+            php .checker/run generate:recipes-readme index.json > RECIPES.md
+            git add RECIPES.md
+            git commit -m 'Update Flex endpoint' || true
+            git push -f "https://gitlab-ci-token:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" flex/main
+
+flex-update-archived:
+    stage: flex-update-archived
+    image: composer:2
+    rules:
+        -
+            if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            when: manual
+    allow_failure: true
+    before_script:
+        - apk add --no-cache git
+        - git clone --branch "$CHECKER_REF" --depth 1 https://github.com/madcat34/private-recipe-checker.git .checker
+        - (cd .checker && composer install --no-dev --ansi)
+        - git config --global user.email ""
+        - git config --global user.name "gitlab-ci"
+    script:
+        - |
+            git checkout "$CI_DEFAULT_BRANCH"
+            mkdir archived
+            php .checker/run generate:archived-recipes . "$CI_DEFAULT_BRANCH" archived
+            git fetch origin flex/main
+            git switch flex/main
+            cp -a archived .
+            git add archived/
+            git commit -m 'Update Flex archives' || true
+            git push -f "https://gitlab-ci-token:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" flex/main
+
+flex-cleanup:
+    stage: flex-cleanup
+    image: alpine:latest
+    rules:
+        - if: $CI_PIPELINE_SOURCE == "schedule"
+    before_script:
+        - apk add --no-cache git curl jq
+    script:
+        - |
+            OPEN_IIDS=$(curl --silent --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
+                "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests?state=opened&per_page=100" \
+                | jq -r '.[].iid')
+            git ls-remote "https://gitlab-ci-token:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" 'refs/heads/flex/mr-*' \
+                | sed 's#.*refs/heads/##' \
+                | while read -r branch; do
+                    iid="${branch#flex/mr-}"
+                    if ! grep -qx "$iid" <<< "$OPEN_IIDS"; then
+                        git push "https://gitlab-ci-token:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" --delete "$branch" || true
+                    fi
+                done
