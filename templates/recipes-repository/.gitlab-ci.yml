@@ -102,7 +102,6 @@ create-project:
     before_script:
         - apt-get update -qq && apt-get install -qq -y unzip
         - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
-        - composer config -g http-basic."${CI_SERVER_HOST}" gitlab-ci-token "${VCS_TOKEN}"
         - >
             PACKAGES=$(curl -sS --header "PRIVATE-TOKEN: ${VCS_TOKEN}"
             "${CI_SERVER_URL}/${CI_PROJECT_PATH}/-/raw/flex/mr-${CI_MERGE_REQUEST_IID}/index.json"
@@ -112,7 +111,7 @@ create-project:
         - cd test-project
         - composer config extra.symfony.allow-contrib false
         - composer config minimum-stability dev
-        - export SYMFONY_ENDPOINT="${CI_SERVER_URL}/${CI_PROJECT_PATH}/-/raw/flex/mr-${CI_MERGE_REQUEST_IID}/index.json"
+        - export SYMFONY_ENDPOINT="https://gitlab-ci-token:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}/-/raw/flex/mr-${CI_MERGE_REQUEST_IID}/index.json"
         - composer require -W --ansi $PACKAGES
 
 flex-update:
