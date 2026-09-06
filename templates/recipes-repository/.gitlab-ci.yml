@@ -58,7 +58,7 @@ run-checks:
                 git add ./*.json
                 git commit -m 'Create Flex endpoint' || true
                 git push -f "https://gitlab-ci-token:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" "flex/mr-$CI_MERGE_REQUEST_IID"
-                git switch -
+                git checkout "$CI_COMMIT_SHA"
                 git stash pop -q
             fi
         - >
