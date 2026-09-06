@@ -104,14 +104,14 @@ create-project:
         - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
         - >
             PACKAGES=$(curl -sS --header "PRIVATE-TOKEN: ${VCS_TOKEN}"
-            "${CI_SERVER_URL}/${CI_PROJECT_PATH}/-/raw/flex/mr-${CI_MERGE_REQUEST_IID}/index.json"
+            "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/files/index.json/raw?ref=flex%2Fmr-${CI_MERGE_REQUEST_IID}"
             | php -r '$d=json_decode(file_get_contents("php://stdin"),true);$p=[];foreach($d["recipes"] as $k=>$v){$p[]="$k:^".end($v);}echo implode(" ",$p);')
     script:
         - composer create-project --ansi symfony/skeleton test-project
         - cd test-project
         - composer config extra.symfony.allow-contrib false
         - composer config minimum-stability dev
-        - export SYMFONY_ENDPOINT="https://gitlab-ci-token:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}/-/raw/flex/mr-${CI_MERGE_REQUEST_IID}/index.json"
+        - export SYMFONY_ENDPOINT="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/files/index.json/raw?ref=flex%2Fmr-${CI_MERGE_REQUEST_IID}&private_token=${VCS_TOKEN}"
         - composer require -W --ansi $PACKAGES
 
 flex-update:
