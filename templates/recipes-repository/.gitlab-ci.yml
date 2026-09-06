@@ -54,8 +54,9 @@ run-checks:
                 git stash
                 git switch --orphan "flex/mr-$CI_MERGE_REQUEST_IID"
                 git reset --hard -q
+                FLEX_FILES=$(ls flex-endpoint/*.json | xargs -n1 basename)
                 mv flex-endpoint/*.json .
-                git add ./*.json
+                git add -- $FLEX_FILES
                 git commit -m 'Create Flex endpoint' || true
                 git push -f "https://gitlab-ci-token:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" "flex/mr-$CI_MERGE_REQUEST_IID"
                 git checkout "$CI_COMMIT_SHA"
@@ -93,6 +94,14 @@ run-checks:
             codequality:
                 - "gl-code-quality-report-*.json"
 
+# This job fetches the flex/mr-* endpoint via GitLab's -/raw/ web route, unauthenticated. That
+# route rejects PRIVATE-TOKEN, Basic auth, and private_token alike on a private project (confirmed
+# against a real one — all three redirect to /users/sign_in), so this job only works if the
+# recipes repository (or at least its flex/mr-* branches) is public. It also can't be swapped for
+# the API's repository/files/.../raw endpoint: Composer/Flex resolves each per-package recipe file
+# by textually swapping "index.json" for "{package}.json" in SYMFONY_ENDPOINT, assuming sibling
+# files under the same "directory" — which holds for -/raw/<branch>/index.json but not for the
+# API's path-segment-based URL shape.
 create-project:
     stage: create-project
     image: php:8.4-cli
@@ -104,14 +113,14 @@ create-project:
         - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
         - >
             PACKAGES=$(curl -sS --header "PRIVATE-TOKEN: ${VCS_TOKEN}"
-            "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/files/index.json/raw?ref=flex%2Fmr-${CI_MERGE_REQUEST_IID}"
+            "${CI_SERVER_URL}/${CI_PROJECT_PATH}/-/raw/flex/mr-${CI_MERGE_REQUEST_IID}/index.json"
             | php -r '$d=json_decode(file_get_contents("php://stdin"),true);$p=[];foreach($d["recipes"] as $k=>$v){$p[]="$k:^".end($v);}echo implode(" ",$p);')
     script:
         - composer create-project --ansi symfony/skeleton test-project
         - cd test-project
         - composer config extra.symfony.allow-contrib false
         - composer config minimum-stability dev
-        - export SYMFONY_ENDPOINT="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/files/index.json/raw?ref=flex%2Fmr-${CI_MERGE_REQUEST_IID}&private_token=${VCS_TOKEN}"
+        - export SYMFONY_ENDPOINT="${CI_SERVER_URL}/${CI_PROJECT_PATH}/-/raw/flex/mr-${CI_MERGE_REQUEST_IID}/index.json"
         - composer require -W --ansi $PACKAGES
 
 flex-update:
