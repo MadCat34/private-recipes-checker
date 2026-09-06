@@ -139,9 +139,12 @@ flex-update:
         - |
             mkdir flex-endpoint
             git ls-tree HEAD */*/* | php .checker/run generate:flex-endpoint "$CI_PROJECT_PATH" "$CI_DEFAULT_BRANCH" flex/main flex-endpoint
-            git fetch origin flex/main
-            git switch flex/main
-            git rm -q *.json
+            if git fetch origin flex/main; then
+                git switch flex/main
+                git rm -q *.json
+            else
+                git switch --orphan flex/main
+            fi
             mv flex-endpoint/*.json .
             git add ./*.json
             cp -a flex-endpoint/archived .
