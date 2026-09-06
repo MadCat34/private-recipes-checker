@@ -50,7 +50,7 @@ final class GitLabErrorReporter implements ErrorReporter
         $safeCommandName = str_replace(':', '-', $commandName);
         file_put_contents(
             sprintf('%s/gl-code-quality-report-%s.json', $this->outputDir, $safeCommandName),
-            json_encode($issues, \JSON_PRETTY_PRINT)
+            json_encode($issues, \JSON_PRETTY_PRINT)."\n"
         );
     }
 }

@@ -63,6 +63,6 @@ class GitLabErrorReporterTest extends TestCase
         $reporter->flush('lint:yaml');
 
         $path = $this->outputDir.'/gl-code-quality-report-lint-yaml.json';
-        $this->assertSame('[]', file_get_contents($path));
+        $this->assertSame("[]\n", file_get_contents($path));
     }
 }
