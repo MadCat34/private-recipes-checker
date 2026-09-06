@@ -102,7 +102,7 @@ create-project:
     before_script:
         - apt-get update -qq && apt-get install -qq -y unzip
         - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
-        - composer config -g gitlab-token."${CI_SERVER_HOST}" "${VCS_TOKEN}"
+        - composer config -g http-basic."${CI_SERVER_HOST}" gitlab-ci-token "${VCS_TOKEN}"
         - >
             PACKAGES=$(curl -sS --header "PRIVATE-TOKEN: ${VCS_TOKEN}"
             "${CI_SERVER_URL}/${CI_PROJECT_PATH}/-/raw/flex/mr-${CI_MERGE_REQUEST_IID}/index.json"
