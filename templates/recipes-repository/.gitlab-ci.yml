@@ -100,6 +100,7 @@ create-project:
     rules:
         - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     before_script:
+        - apt-get update -qq && apt-get install -qq -y unzip
         - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
         - >
             PACKAGES=$(curl -sS --header "PRIVATE-TOKEN: ${VCS_TOKEN}"
