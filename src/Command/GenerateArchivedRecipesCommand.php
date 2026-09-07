@@ -50,6 +50,17 @@ class GenerateArchivedRecipesCommand extends Command
             throw new \InvalidArgumentException(sprintf('Cannot find directory "%s"', $recipesDirectory));
         }
 
+        // This command checks out every commit of $recipesDirectory in turn, so uncommitted work
+        // there would be silently discarded by the very first checkout. Refuse rather than destroy.
+        $status = (new Process(['git', 'status', '--porcelain'], $recipesDirectory))->mustRun();
+        if ('' !== trim($status->getOutput())) {
+            throw new \RuntimeException(sprintf('The repository at "%s" has uncommitted changes. Commit or stash them first: this command checks out every commit in turn and would discard them.', $recipesDirectory));
+        }
+
+        // Remembered so the finally below can put the repository back where the user left it —
+        // the loop walks history with detaching checkouts and would otherwise strand it there.
+        $startingRef = trim((new Process(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], $recipesDirectory))->mustRun()->getOutput());
+
         $process = new Process(['git', 'checkout', $branch], $recipesDirectory);
         $process->mustRun();
 
@@ -63,25 +74,32 @@ class GenerateArchivedRecipesCommand extends Command
         // an imperfect estimate of the total commits
         $totalCommits = (int) trim($process->getOutput());
         $progress = new ProgressBar($output, $totalCommits);
-        while (true) {
-            // most arguments to the command do not matter for us and so are hardcoded
-            $process = Process::fromShellCommandline(
-                sprintf('git ls-tree HEAD */*/* | php %s/run generate:flex-endpoint symfony/recipes master flex/main $OUTPUT_DIR', $checkerRoot),
-                $recipesDirectory
-            );
-            // this WILL occasionally fail: some legacy recipes were invalid and pointed to non-existent files
-            $process->run(null, ['OUTPUT_DIR' => $tmpDir]);
 
-            $process = new Process(['git', 'checkout', 'HEAD^1'], $recipesDirectory);
-            $process->mustRun();
+        try {
+            while (true) {
+                // most arguments to the command do not matter for us and so are hardcoded
+                $process = Process::fromShellCommandline(
+                    sprintf('git ls-tree HEAD */*/* | php %s/run generate:flex-endpoint symfony/recipes master flex/main $OUTPUT_DIR', $checkerRoot),
+                    $recipesDirectory
+                );
+                // this WILL occasionally fail: some legacy recipes were invalid and pointed to non-existent files
+                $process->run(null, ['OUTPUT_DIR' => $tmpDir]);
 
-            $process = (new Process(['git', 'rev-list', '--count', 'HEAD', '--no-merges'], $recipesDirectory))->mustRun();
-            $newCount = (int) trim($process->getOutput());
-            // when we've come to the final commit, this will be 1
-            if (1 === $newCount) {
-                break;
+                $process = new Process(['git', 'checkout', 'HEAD^1'], $recipesDirectory);
+                $process->mustRun();
+
+                $process = (new Process(['git', 'rev-list', '--count', 'HEAD', '--no-merges'], $recipesDirectory))->mustRun();
+                $newCount = (int) trim($process->getOutput());
+                // when we've come to the final commit, this will be 1
+                if (1 === $newCount) {
+                    break;
+                }
+                $progress->setProgress($totalCommits - $newCount);
             }
-            $progress->setProgress($totalCommits - $newCount);
+        } finally {
+            // Covers the exception path too: a failed checkout mid-walk must not leave the user's
+            // repository detached on some arbitrary commit.
+            (new Process(['git', 'checkout', $startingRef], $recipesDirectory))->run();
         }
 
         $filesystem->mirror($tmpDir.'/archived', $outputDir);

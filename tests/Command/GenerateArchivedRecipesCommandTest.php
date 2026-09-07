@@ -99,4 +99,65 @@ class GenerateArchivedRecipesCommandTest extends TestCase
 
         $filesystem->remove([$repoDir, $outputDir]);
     }
+
+    public function testRestoresTheStartingBranchOnSuccess(): void
+    {
+        $filesystem = new Filesystem();
+        $repoDir = sys_get_temp_dir().'/archived-restore-test-'.uniqid();
+        $checkerRoot = sys_get_temp_dir().'/archived-restore-checker-'.uniqid();
+        $outputDir = sys_get_temp_dir().'/archived-restore-out-'.uniqid();
+        $filesystem->mkdir([$repoDir, $checkerRoot, $outputDir]);
+
+        file_put_contents($checkerRoot.'/run', <<<'PHP'
+            <?php
+            $outputDir = getenv('OUTPUT_DIR');
+            @mkdir($outputDir.'/archived', 0777, true);
+            file_put_contents($outputDir.'/archived/marker.json', '{}');
+            PHP
+        );
+
+        $this->initGitRepo($repoDir, [
+            [],
+            ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
+        ]);
+
+        $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
+        $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir]);
+
+        $branch = (new Process(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], $repoDir))->mustRun()->getOutput();
+        $this->assertSame('main', trim($branch), 'the command left the repository on a detached HEAD');
+
+        $filesystem->remove([$repoDir, $checkerRoot, $outputDir]);
+    }
+
+    public function testRefusesToRunAgainstADirtyWorkingTree(): void
+    {
+        $filesystem = new Filesystem();
+        $repoDir = sys_get_temp_dir().'/archived-dirty-test-'.uniqid();
+        $outputDir = sys_get_temp_dir().'/archived-dirty-out-'.uniqid();
+        $filesystem->mkdir([$repoDir, $outputDir]);
+
+        $this->initGitRepo($repoDir, [
+            [],
+            ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
+        ]);
+
+        // Uncommitted work the initial `git checkout` would silently discard.
+        file_put_contents($repoDir.'/acme/private-bundle/1.0/manifest.json', json_encode(['container' => ['x' => 999]]));
+
+        $tester = new CommandTester(new GenerateArchivedRecipesCommand());
+
+        try {
+            $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir]);
+            $this->fail('the command should refuse to run against a dirty working tree');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('uncommitted changes', $e->getMessage());
+        }
+
+        // The user's work is untouched.
+        $contents = file_get_contents($repoDir.'/acme/private-bundle/1.0/manifest.json');
+        $this->assertStringContainsString('999', $contents);
+
+        $filesystem->remove([$repoDir, $outputDir]);
+    }
 }
