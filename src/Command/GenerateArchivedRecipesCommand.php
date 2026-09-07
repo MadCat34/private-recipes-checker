@@ -35,6 +35,7 @@ class GenerateArchivedRecipesCommand extends Command
             ->addArgument('directory', InputArgument::REQUIRED, 'Path to the local recipes repository')
             ->addArgument('branch', InputArgument::REQUIRED, 'Branch on the recipes repository to use')
             ->addArgument('output_directory', InputArgument::REQUIRED, 'The directory where generated files should be stored')
+            ->addArgument('repository', InputArgument::REQUIRED, 'The name of the repository (e.g. "acme/recipes"), recorded in the archived files\' _links')
         ;
     }
 
@@ -43,6 +44,7 @@ class GenerateArchivedRecipesCommand extends Command
         $recipesDirectory = $input->getArgument('directory');
         $branch = $input->getArgument('branch');
         $outputDir = $input->getArgument('output_directory');
+        $repository = $input->getArgument('repository');
         $checkerRoot = $this->checkerRoot ?? realpath(__DIR__.'/../..');
         $filesystem = new Filesystem();
 
@@ -79,7 +81,12 @@ class GenerateArchivedRecipesCommand extends Command
             while (true) {
                 // most arguments to the command do not matter for us and so are hardcoded
                 $process = Process::fromShellCommandline(
-                    sprintf('git ls-tree HEAD */*/* | php %s generate:flex-endpoint symfony/recipes master flex/main $OUTPUT_DIR', escapeshellarg($checkerRoot.'/run')),
+                    sprintf(
+                        'git ls-tree HEAD */*/* | php %s generate:flex-endpoint %s %s flex/main $OUTPUT_DIR',
+                        escapeshellarg($checkerRoot.'/run'),
+                        escapeshellarg($repository),
+                        escapeshellarg($branch),
+                    ),
                     $recipesDirectory
                 );
                 // this WILL occasionally fail: some legacy recipes were invalid and pointed to non-existent files

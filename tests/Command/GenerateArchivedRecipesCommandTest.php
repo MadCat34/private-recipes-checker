@@ -59,7 +59,7 @@ class GenerateArchivedRecipesCommandTest extends TestCase
         ]);
 
         $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
-        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir]);
+        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
 
         $this->assertSame(0, $exitCode);
         $this->assertFileExists($outputDir.'/marker.json');
@@ -87,7 +87,7 @@ class GenerateArchivedRecipesCommandTest extends TestCase
         ]);
 
         $tester = new CommandTester(new GenerateArchivedRecipesCommand());
-        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir]);
+        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
 
         putenv('GITHUB_ACTIONS');
 
@@ -122,7 +122,7 @@ class GenerateArchivedRecipesCommandTest extends TestCase
         ]);
 
         $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
-        $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir]);
+        $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
 
         $branch = (new Process(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], $repoDir))->mustRun()->getOutput();
         $this->assertSame('main', trim($branch), 'the command left the repository on a detached HEAD');
@@ -152,7 +152,7 @@ class GenerateArchivedRecipesCommandTest extends TestCase
         ]);
 
         $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
-        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir]);
+        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
 
         $this->assertSame(0, $exitCode);
         $this->assertFileExists($outputDir.'/marker.json');
@@ -183,7 +183,7 @@ class GenerateArchivedRecipesCommandTest extends TestCase
         ]);
 
         $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
-        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir]);
+        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
 
         $this->assertSame(0, $exitCode);
         $this->assertFileExists($outputDir.'/marker.json');
@@ -209,7 +209,7 @@ class GenerateArchivedRecipesCommandTest extends TestCase
         $tester = new CommandTester(new GenerateArchivedRecipesCommand());
 
         try {
-            $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir]);
+            $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
             $this->fail('the command should refuse to run against a dirty working tree');
         } catch (\RuntimeException $e) {
             $this->assertStringContainsString('uncommitted changes', $e->getMessage());
@@ -220,5 +220,46 @@ class GenerateArchivedRecipesCommandTest extends TestCase
         $this->assertStringContainsString('999', $contents);
 
         $filesystem->remove([$repoDir, $outputDir]);
+    }
+
+    public function testPassesTheRepositoryThroughToTheEndpointGenerator(): void
+    {
+        $filesystem = new Filesystem();
+        $repoDir = sys_get_temp_dir().'/archived-repo-arg-test-'.uniqid();
+        $checkerRoot = sys_get_temp_dir().'/archived-repo-arg-checker-'.uniqid();
+        $outputDir = sys_get_temp_dir().'/archived-repo-arg-out-'.uniqid();
+        $filesystem->mkdir([$repoDir, $checkerRoot, $outputDir]);
+
+        // The fake "run" records the arguments it was handed, so the test can assert that the
+        // caller no longer hardcodes symfony/recipes.
+        file_put_contents($checkerRoot.'/run', <<<'PHP'
+            <?php
+            $outputDir = getenv('OUTPUT_DIR');
+            @mkdir($outputDir.'/archived', 0777, true);
+            file_put_contents($outputDir.'/archived/args.json', json_encode(array_slice($argv, 1)));
+            PHP
+        );
+
+        $this->initGitRepo($repoDir, [
+            [],
+            ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
+        ]);
+
+        $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
+        $tester->execute([
+            'directory' => $repoDir,
+            'branch' => 'main',
+            'output_directory' => $outputDir,
+            'repository' => 'acme/private-recipes',
+        ]);
+
+        $args = json_decode(file_get_contents($outputDir.'/args.json'), true);
+
+        $this->assertSame('generate:flex-endpoint', $args[0]);
+        $this->assertSame('acme/private-recipes', $args[1]);
+        $this->assertSame('main', $args[2]);
+        $this->assertNotContains('symfony/recipes', $args);
+
+        $filesystem->remove([$repoDir, $checkerRoot, $outputDir]);
     }
 }
