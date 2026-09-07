@@ -96,7 +96,11 @@ run-checks:
             "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/merge?merge_when_pipeline_succeeds=true&squash=true"
             || true
         - |
-            find . -mindepth 1 -maxdepth 1 -type d ! -name '.git' ! -name '.checker' | sort \
+            # diff-recipe-versions expects one "vendor/package" path per line (it scandir()s each
+            # one for version subdirectories) — a plain top-level `find -maxdepth 1` only lists
+            # "vendor", one level too shallow, which silently produced garbage package names
+            # ("./monolog:^..") in the "how to test" composer req snippet below.
+            find * -mindepth 1 -maxdepth 1 -type d | sort \
                 | .checker/run diff-recipe-versions "${CI_SERVER_URL}/${CI_PROJECT_PATH}/-/raw/flex/mr-${CI_MERGE_REQUEST_IID}/index.json" \
                 > diff-recipe-versions.md
         - |
