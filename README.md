@@ -1,5 +1,9 @@
 # Private Recipe Checker
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+[![PHP](https://img.shields.io/badge/PHP-%3E%3D8.4-777bb4.svg)](composer.json)
+[![Symfony](https://img.shields.io/badge/Symfony-8.1-000000.svg)](composer.json)
+
 A fork of [symfony-tools/recipes-checker](https://github.com/symfony-tools/recipes-checker) —
 credit to its original authors, **Fabien Potencier** and **Nicolas Grekas** — adapted to manage
 **private** Symfony Flex recipes for a company's internal bundles, instead of the official
@@ -53,12 +57,80 @@ This fork corrects the metadata to match the license that was always actually th
 
 AGPL-3.0-or-later — see [LICENSE](LICENSE).
 
-## Usage
+## Requirements
+
+- PHP >= 8.4, with the `ctype`, `intl`, and `mbstring` extensions
+- Composer 2
+
+## Installation
 
 ```bash
 composer install
 ./run list
 ```
 
-See `.recipes-checker.yaml` (documented in `CLAUDE.md`) for registry configuration, and
-`resources/manifest.schema.json` for the recipe manifest schema.
+## Commands
+
+```
+ generate
+  generate:archived-recipes  Generates an "archived" directory containing the history of every recipe.
+  generate:flex-endpoint     Generates the json files required by Flex
+  generate:recipes-readme    Generates a "README" containing a list of all recipes.
+ lint
+  lint:files                 Validates file-level conventions (indentation, extensions, newlines, ...)
+  lint:manifests             Checks manifest.json files
+  lint:packages              Ensures directories map to valid packages in the configured registry
+  lint:pull-request          Ensures the PR/MR can be accepted
+  lint:yaml                  Validates the content of yaml files
+ misc
+  diff-recipe-versions       Displays the diff between versions of a recipe
+  list-unpatched-packages    Lists packages that are *not* patched by the PR/MR
+```
+
+Run `./run <command> --help` for a command's arguments and options.
+
+## Configuration
+
+Create a `.recipes-checker.yaml` at the root of your recipes repository:
+
+```yaml
+registry:
+  type: packagist # or "artifactory"
+  # url: https://artifactory.example.com/artifactory/api/composer/my-repo # artifactory only
+  # token: "%env(ARTIFACTORY_TOKEN)%"                                     # artifactory only
+
+readme:
+  header: "# My Company's Private Recipes" # optional, used by generate:recipes-readme
+```
+
+The VCS (GitHub Actions or GitLab CI) is auto-detected from the CI environment — no configuration
+needed there.
+
+The recipe manifest schema lives at `resources/manifest.schema.json` (JSON Schema draft 2020-12,
+validated with `opis/json-schema`). Reference it from a recipe's own `manifest.json` via `$schema`
+for live validation in editors that support it.
+
+## CI templates
+
+Ready-to-copy CI pipelines for a private recipes repository live under
+`templates/recipes-repository/`:
+
+- **`.gitlab-ci.yml`** — lints merge requests, smoke-tests the resulting Flex endpoint against a
+  throwaway `symfony/skeleton` project, auto-merges on success, and keeps the `flex/main` branch
+  (the actual Flex endpoint served to consumers) and its `archived/` history up to date on every
+  push to the default branch. See the comments at the top of the file for the GitLab project
+  settings (protected branches, merge checks) and CI/CD variables it assumes.
+- **`.github/workflows/qa.yml`** and **`callable-qa.yml`** — the GitHub Actions equivalent.
+
+Both templates pin the checker via a `CHECKER_REF` variable/input — set it to a tagged release
+once you've cut one, rather than tracking `main` unversioned (see "why it is not expected to be
+upstreamed" below for why that matters).
+
+## Development
+
+```bash
+composer install
+vendor/bin/phpunit
+```
+
+The test suite (PHPUnit) covers `src/`; the upstream tool this was forked from had none.
