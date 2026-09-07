@@ -222,6 +222,46 @@ class GenerateArchivedRecipesCommandTest extends TestCase
         $filesystem->remove([$repoDir, $outputDir]);
     }
 
+    public function testDoesNotRefuseOnUntrackedFilesLikeTheShippedGitlabTemplate(): void
+    {
+        // The shipped flex-update-archived job (templates/recipes-repository/.gitlab-ci.yml) clones
+        // the checker into .checker/ inside the recipes repository's own working tree before running
+        // this command against ".". That leaves an untracked directory that `git status --porcelain`
+        // reports as "?? .checker/" — but an untracked directory is never at risk from the
+        // `git checkout` calls this command makes, so it must not block the run.
+        $filesystem = new Filesystem();
+        $repoDir = sys_get_temp_dir().'/archived-untracked-test-'.uniqid();
+        $checkerRoot = sys_get_temp_dir().'/archived-untracked-checker-'.uniqid();
+        $outputDir = sys_get_temp_dir().'/archived-untracked-out-'.uniqid();
+        $filesystem->mkdir([$repoDir, $checkerRoot, $outputDir]);
+
+        file_put_contents($checkerRoot.'/run', <<<'PHP'
+            <?php
+            $outputDir = getenv('OUTPUT_DIR');
+            @mkdir($outputDir.'/archived', 0777, true);
+            file_put_contents($outputDir.'/archived/marker.json', '{}');
+            PHP
+        );
+
+        $this->initGitRepo($repoDir, [
+            [],
+            ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
+        ]);
+
+        // Mirrors the CI template: an untracked ".checker/" directory sitting inside the repository
+        // being processed, as `git clone ... .checker` would produce.
+        $filesystem->mkdir($repoDir.'/.checker');
+        $filesystem->dumpFile($repoDir.'/.checker/marker.txt', 'untracked');
+
+        $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
+        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
+
+        $this->assertSame(0, $exitCode);
+        $this->assertFileExists($outputDir.'/marker.json');
+
+        $filesystem->remove([$repoDir, $checkerRoot, $outputDir]);
+    }
+
     public function testPassesTheRepositoryThroughToTheEndpointGenerator(): void
     {
         $filesystem = new Filesystem();

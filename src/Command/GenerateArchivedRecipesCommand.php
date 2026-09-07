@@ -54,7 +54,15 @@ class GenerateArchivedRecipesCommand extends Command
 
         // This command checks out every commit of $recipesDirectory in turn, so uncommitted work
         // there would be silently discarded by the very first checkout. Refuse rather than destroy.
-        $status = (new Process(['git', 'status', '--porcelain'], $recipesDirectory))->mustRun();
+        //
+        // --untracked-files=no on purpose: a `git checkout` never touches untracked files, so they
+        // are not at risk and must not trip this guard. This also matters operationally: the
+        // project's own templates/recipes-repository/.gitlab-ci.yml (flex-update-archived job)
+        // clones the checker into an untracked ".checker/" directory inside the recipes repository
+        // before running this command against ".". A stricter check here would report "?? .checker/"
+        // and make that shipped CI job fail (silently, since it runs with allow_failure: true) for
+        // every adopter of the template.
+        $status = (new Process(['git', 'status', '--porcelain', '--untracked-files=no'], $recipesDirectory))->mustRun();
         if ('' !== trim($status->getOutput())) {
             throw new \RuntimeException(sprintf('The repository at "%s" has uncommitted changes. Commit or stash them first: this command checks out every commit in turn and would discard them.', $recipesDirectory));
         }
