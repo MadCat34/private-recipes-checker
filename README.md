@@ -96,12 +96,26 @@ Create a `.recipes-checker.yaml` at the root of your recipes repository:
 ```yaml
 registry:
   type: packagist # or "artifactory"
-  # url: https://artifactory.example.com/artifactory/api/composer/my-repo # artifactory only
-  # token: "%env(ARTIFACTORY_TOKEN)%"                                     # artifactory only
+
+  # artifactory only — required:
+  # url: https://mycompany.jfrog.io/artifactory/api/composer/my-repo
+  # browse_url_template: https://mycompany.jfrog.io/ui/repos/tree/General/my-repo/%package%
+
+  # artifactory only — optional, defaults to "%url%/p2/%package%.json":
+  # metadata_url_template: "%url%/p2/%package%.json"
 
 readme:
   header: "# My Company's Private Recipes" # optional, used by generate:recipes-readme
 ```
+
+Authentication against a private registry is **not** configured in this file: set the
+`REGISTRY_TOKEN` environment variable instead, and it is sent as `Authorization: Bearer <token>`.
+Keeping it out of the YAML keeps the secret out of the repository.
+
+`browse_url_template` and `metadata_url_template` both substitute `%package%` (and
+`metadata_url_template` also substitutes `%url%`). `browse_url_template` is required for
+Artifactory: it produces the per-package links in the `RECIPES.md` that `generate:recipes-readme`
+writes.
 
 The VCS (GitHub Actions or GitLab CI) is auto-detected from the CI environment — no configuration
 needed there.
