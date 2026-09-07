@@ -140,6 +140,30 @@ Both templates pin the checker via a `CHECKER_REF` variable/input — set it to 
 once you've cut one, rather than tracking `main` unversioned (see "why it is not expected to be
 upstreamed" below for why that matters).
 
+## Known limitations
+
+**GitLab raw file URLs are not consumable by Flex.** `GitLabProvider::getRawFileUrl()` builds
+`repository/files/…/raw` API URLs, which land in the published `index.json`. Flex resolves each
+per-package recipe by textually swapping `index.json` for `{package}.json`, which assumes sibling
+files under one directory — a property the API URL shape does not have. Those URLs also carry no
+token, so they return 401 on a private repository. The shipped `.gitlab-ci.yml` works around this
+by serving the endpoint from the `-/raw/` web route, which requires the recipes repository (or at
+least its `flex/*` branches) to be public. See commit `2b8b1ba` for the full analysis. Fixing this
+properly means reworking the `VcsProvider` contract and is tracked separately.
+
+**Verification status.** Not every supported path has been exercised against a live system:
+
+| Path | Status |
+| --- | --- |
+| GitLab CI | verified against a real project |
+| Packagist | verified |
+| GitHub Actions | not verified — the workflow template has never run |
+| JFrog Artifactory | not verified — no live instance exercised |
+
+The unverified paths are implemented and unit-tested, but their tests assert that the code does
+what it says, not that what it says matches the remote system. Treat them as a starting point
+rather than a guarantee.
+
 ## Development
 
 ```bash
