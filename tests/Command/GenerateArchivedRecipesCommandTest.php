@@ -54,7 +54,7 @@ class GenerateArchivedRecipesCommandTest extends TestCase
         );
 
         $this->initGitRepo($repoDir, [
-            [], // root commit — the loop always checks out HEAD^1, so it needs one to land on
+            [], // an extra commit, so this exercises the multi-commit walk rather than the single-commit exit
             ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
         ]);
 
@@ -126,6 +126,36 @@ class GenerateArchivedRecipesCommandTest extends TestCase
 
         $branch = (new Process(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], $repoDir))->mustRun()->getOutput();
         $this->assertSame('main', trim($branch), 'the command left the repository on a detached HEAD');
+
+        $filesystem->remove([$repoDir, $checkerRoot, $outputDir]);
+    }
+
+    public function testHandlesARepositoryWithASingleCommit(): void
+    {
+        $filesystem = new Filesystem();
+        $repoDir = sys_get_temp_dir().'/archived-single-test-'.uniqid();
+        $checkerRoot = sys_get_temp_dir().'/archived-single-checker-'.uniqid();
+        $outputDir = sys_get_temp_dir().'/archived-single-out-'.uniqid();
+        $filesystem->mkdir([$repoDir, $checkerRoot, $outputDir]);
+
+        file_put_contents($checkerRoot.'/run', <<<'PHP'
+            <?php
+            $outputDir = getenv('OUTPUT_DIR');
+            @mkdir($outputDir.'/archived', 0777, true);
+            file_put_contents($outputDir.'/archived/marker.json', '{}');
+            PHP
+        );
+
+        // A single commit: the loop must not attempt HEAD^1, which does not exist.
+        $this->initGitRepo($repoDir, [
+            ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
+        ]);
+
+        $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
+        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir]);
+
+        $this->assertSame(0, $exitCode);
+        $this->assertFileExists($outputDir.'/marker.json');
 
         $filesystem->remove([$repoDir, $checkerRoot, $outputDir]);
     }

@@ -85,16 +85,18 @@ class GenerateArchivedRecipesCommand extends Command
                 // this WILL occasionally fail: some legacy recipes were invalid and pointed to non-existent files
                 $process->run(null, ['OUTPUT_DIR' => $tmpDir]);
 
+                // Checked before descending: on the root commit HEAD^1 does not exist, and the
+                // old order tried the checkout first, surfacing a raw git pathspec error.
+                $process = (new Process(['git', 'rev-list', '--count', 'HEAD', '--no-merges'], $recipesDirectory))->mustRun();
+                $remainingCommits = (int) trim($process->getOutput());
+                if ($remainingCommits <= 1) {
+                    break;
+                }
+
                 $process = new Process(['git', 'checkout', 'HEAD^1'], $recipesDirectory);
                 $process->mustRun();
 
-                $process = (new Process(['git', 'rev-list', '--count', 'HEAD', '--no-merges'], $recipesDirectory))->mustRun();
-                $newCount = (int) trim($process->getOutput());
-                // when we've come to the final commit, this will be 1
-                if (1 === $newCount) {
-                    break;
-                }
-                $progress->setProgress($totalCommits - $newCount);
+                $progress->setProgress($totalCommits - $remainingCommits);
             }
         } finally {
             // Covers the exception path too: a failed checkout mid-walk must not leave the user's
