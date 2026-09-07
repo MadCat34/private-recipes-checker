@@ -92,7 +92,7 @@ jobs:
                     git config --local --unset-all http.https://github.com/.extraheader || true
                     git push -f "https://x-access-token:${{ secrets.token }}@github.com/${{ github.repository }}" "flex/pull-${{ github.event.number }}"
                     git switch pr
-                    git stash pop -q
+                    git stash pop -q || true
 
             -
                 name: Enable Automerge
