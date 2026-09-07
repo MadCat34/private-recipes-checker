@@ -241,10 +241,17 @@ class LintFilesCommandTest extends TestCase
         $this->filesystem->dumpFile($this->fixtureDir.'/vendor/some/package/composer.json', "{\n  \"a\": 1\n}\n");
         $this->filesystem->dumpFile($this->fixtureDir.'/node_modules/some-package/package.json', "{\n  \"b\": 2\n}\n");
 
+        // A real violation at a normal path, with the same two-space indentation as the dependency
+        // fixtures above. Without this, the assertion that dependency directories produce no errors
+        // would pass just as well if the Finder matched nothing at all — this proves the linter is
+        // actually running and would catch the same mistake outside vendor/ and node_modules/.
+        $this->writeFixture('a.json', "{\n  \"c\": 3\n}\n");
+
         $reporter = new RecordingErrorReporter();
         $exitCode = (new CommandTester(new LintFilesCommand($reporter, $this->fixtureDir)))->execute([]);
 
-        $this->assertSame([], $reporter->errors);
-        $this->assertSame(0, $exitCode);
+        $this->assertTrue($this->hasErrorContaining($reporter, 'Indentation must be a multiple of 4 spaces'));
+        $this->assertSame(['a.json'], array_values(array_unique(array_column($reporter->errors, 'file'))));
+        $this->assertSame(1, $exitCode);
     }
 }
