@@ -211,4 +211,19 @@ class LintFilesCommandTest extends TestCase
 
         $this->assertSame([], $reporter->errors);
     }
+
+    public function testDependencyDirectoriesAreNotLinted(): void
+    {
+        // Two-space indentation, which checkIndentation() rejects — but these are dependencies,
+        // not recipe content. The shipped pipelines only escaped this because they clone the
+        // checker into a dot-directory, which Finder skips by default.
+        $this->filesystem->dumpFile($this->fixtureDir.'/vendor/some/package/composer.json', "{\n  \"a\": 1\n}\n");
+        $this->filesystem->dumpFile($this->fixtureDir.'/node_modules/some-package/package.json', "{\n  \"b\": 2\n}\n");
+
+        $reporter = new RecordingErrorReporter();
+        $exitCode = (new CommandTester(new LintFilesCommand($reporter, $this->fixtureDir)))->execute([]);
+
+        $this->assertSame([], $reporter->errors);
+        $this->assertSame(0, $exitCode);
+    }
 }
