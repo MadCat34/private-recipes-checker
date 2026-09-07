@@ -54,8 +54,12 @@ jobs:
                 run: |
                     mkdir .github/flex-endpoint
                     git ls-tree HEAD */*/* | php .github/recipes-checker-main/run generate:flex-endpoint ${{ github.repository }} ${{ inputs.branch }} flex/main .github/flex-endpoint
-                    git switch flex/main
-                    git rm -q *.json
+                    if git fetch origin flex/main; then
+                        git switch flex/main
+                        git rm -q *.json
+                    else
+                        git switch --orphan flex/main
+                    fi
                     mv .github/flex-endpoint/*.json .
                     git add *.json
                     cp -a .github/flex-endpoint/archived .
