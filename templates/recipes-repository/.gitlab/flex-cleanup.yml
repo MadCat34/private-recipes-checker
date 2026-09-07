@@ -1,0 +1,28 @@
+# Cleanup Flex testing endpoint — mirrors .github/workflows/flex-cleanup.yml +
+# callable-flex-cleanup.yml.
+#
+# GitHub triggers this the instant a pull request closes (pull_request_target: types: [closed]);
+# GitLab has no equivalent pipeline trigger, so this instead runs on a schedule (see the
+# .gitlab-ci.yml header for the required CI/CD schedule) and sweeps every orphaned flex/mr-*
+# branch whose merge request is no longer open.
+
+flex-cleanup:
+    stage: flex-cleanup
+    image: alpine:latest
+    rules:
+        - if: $CI_PIPELINE_SOURCE == "schedule"
+    before_script:
+        - apk add --no-cache git curl jq
+    script:
+        - |
+            OPEN_IIDS=$(curl --silent --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
+                "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests?state=opened&per_page=100" \
+                | jq -r '.[].iid')
+            git ls-remote "https://gitlab-ci-token:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" 'refs/heads/flex/mr-*' \
+                | sed 's#.*refs/heads/##' \
+                | while read -r branch; do
+                    iid="${branch#flex/mr-}"
+                    if ! grep -qx "$iid" <<< "$OPEN_IIDS"; then
+                        git push "https://gitlab-ci-token:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" --delete "$branch" || true
+                    fi
+                done

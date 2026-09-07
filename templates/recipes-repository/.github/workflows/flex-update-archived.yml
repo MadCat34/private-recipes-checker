@@ -1,0 +1,13 @@
+name: Update Flex Archives
+
+on: [workflow_dispatch]
+
+defaults:
+    run:
+        shell: bash
+
+jobs:
+    call-flex-update-archived:
+        uses: ./.github/workflows/callable-flex-update-archived.yml
+        secrets:
+            token: ${{ secrets.VCS_TOKEN }}

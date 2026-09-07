@@ -39,6 +39,13 @@ jobs:
                     allow-unsafe-pr-checkout: true
 
             -
+                name: Setup PHP
+                uses: shivammathur/setup-php@v2
+                with:
+                    coverage: "none"
+                    php-version: "8.4"
+
+            -
                 name: Install tools
                 run: |
                     git config --global user.email ""

@@ -1,0 +1,36 @@
+# Update Flex Archives — mirrors .github/workflows/flex-update-archived.yml +
+# callable-flex-update-archived.yml.
+#
+# Manual job (GitLab has no exact equivalent of GitHub's workflow_dispatch button outside the
+# pipeline run form, so this is exposed as a manual action on default-branch pipelines instead).
+
+flex-update-archived:
+    stage: flex-update-archived
+    image: composer:2
+    rules:
+        -
+            if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+            when: manual
+    allow_failure: true
+    before_script:
+        - apk add --no-cache git
+        - install-php-extensions intl
+        - git clone --branch "$CHECKER_REF" --depth 1 https://github.com/madcat34/private-recipes-checker.git .checker
+        - (cd .checker && composer install --no-dev --ansi)
+        - git config --global user.email ""
+        - git config --global user.name "gitlab-ci"
+    script:
+        - |
+            git checkout "$CI_DEFAULT_BRANCH"
+            # Generated outside the working tree switch below picks up: flex/main already has its
+            # own tracked archived/ (from a previous run), and git switch refuses to change branch
+            # over untracked files it would otherwise overwrite.
+            mkdir /tmp/archived-endpoint
+            php .checker/run generate:archived-recipes . "$CI_DEFAULT_BRANCH" /tmp/archived-endpoint "$CI_PROJECT_PATH"
+            git fetch origin flex/main
+            git switch flex/main
+            rm -rf archived
+            cp -a /tmp/archived-endpoint archived
+            git add archived/
+            git commit -m 'Update Flex archives' || true
+            git push -f "https://gitlab-ci-token:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" flex/main
