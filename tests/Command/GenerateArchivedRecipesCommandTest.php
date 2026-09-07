@@ -160,6 +160,37 @@ class GenerateArchivedRecipesCommandTest extends TestCase
         $filesystem->remove([$repoDir, $checkerRoot, $outputDir]);
     }
 
+    public function testWorksWhenTheCheckerRootContainsASpace(): void
+    {
+        $filesystem = new Filesystem();
+        $repoDir = sys_get_temp_dir().'/archived-space-test-'.uniqid();
+        // The space is the point: unescaped, the shell splits this into two arguments.
+        $checkerRoot = sys_get_temp_dir().'/archived space checker-'.uniqid();
+        $outputDir = sys_get_temp_dir().'/archived-space-out-'.uniqid();
+        $filesystem->mkdir([$repoDir, $checkerRoot, $outputDir]);
+
+        file_put_contents($checkerRoot.'/run', <<<'PHP'
+            <?php
+            $outputDir = getenv('OUTPUT_DIR');
+            @mkdir($outputDir.'/archived', 0777, true);
+            file_put_contents($outputDir.'/archived/marker.json', '{}');
+            PHP
+        );
+
+        $this->initGitRepo($repoDir, [
+            [],
+            ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
+        ]);
+
+        $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
+        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir]);
+
+        $this->assertSame(0, $exitCode);
+        $this->assertFileExists($outputDir.'/marker.json');
+
+        $filesystem->remove([$repoDir, $checkerRoot, $outputDir]);
+    }
+
     public function testRefusesToRunAgainstADirtyWorkingTree(): void
     {
         $filesystem = new Filesystem();

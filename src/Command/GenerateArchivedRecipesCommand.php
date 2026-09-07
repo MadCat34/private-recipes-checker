@@ -79,7 +79,7 @@ class GenerateArchivedRecipesCommand extends Command
             while (true) {
                 // most arguments to the command do not matter for us and so are hardcoded
                 $process = Process::fromShellCommandline(
-                    sprintf('git ls-tree HEAD */*/* | php %s/run generate:flex-endpoint symfony/recipes master flex/main $OUTPUT_DIR', $checkerRoot),
+                    sprintf('git ls-tree HEAD */*/* | php %s generate:flex-endpoint symfony/recipes master flex/main $OUTPUT_DIR', escapeshellarg($checkerRoot.'/run')),
                     $recipesDirectory
                 );
                 // this WILL occasionally fail: some legacy recipes were invalid and pointed to non-existent files
