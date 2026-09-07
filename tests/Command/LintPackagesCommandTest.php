@@ -137,4 +137,26 @@ class LintPackagesCommandTest extends TestCase
 
         $this->assertSame('https://fake-registry.example/p2/acme/private-bundle.json', $requestedUrl);
     }
+
+    public function testReportsAnUnexpectedRegistryResponseInsteadOfWarning(): void
+    {
+        // A registry answering 200 with a shape we do not understand — realistic on Artifactory,
+        // whose metadata layout is configurable. The old code dereferenced a missing key, emitted
+        // PHP warnings, and then blamed the package for not existing.
+        $this->filesystem->mkdir($this->fixtureDir.'/acme/private-bundle/1.0');
+        file_put_contents($this->fixtureDir.'/acme/private-bundle/1.0/manifest.json', '{}');
+
+        $client = new MockHttpClient([
+            new MockResponse(json_encode(['unexpected' => 'shape']), ['http_code' => 200]),
+        ]);
+
+        $reporter = new RecordingErrorReporter();
+        $command = new LintPackagesCommand(new FakeRegistryProvider(), $reporter, $client);
+        $exitCode = (new CommandTester($command))->execute([]);
+
+        $this->assertSame(1, $exitCode);
+        $this->assertCount(1, $reporter->errors);
+        $this->assertStringContainsString('unexpected response', $reporter->errors[0]['message']);
+        $this->assertStringContainsString('acme/private-bundle', $reporter->errors[0]['message']);
+    }
 }
