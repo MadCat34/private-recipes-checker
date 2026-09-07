@@ -6,6 +6,22 @@
 # GitLab has no pipeline trigger equivalent to GitHub's "pull_request_target: types: [closed]",
 # so orphaned flex/mr-* branches are swept periodically instead of removed the instant a merge
 # request closes.
+#
+# Project-level settings this pipeline depends on, none of which live in this file (GitLab doesn't
+# version them as YAML) — set them once per project under Settings:
+#   Settings > Merge requests:
+#     - "Pipelines must succeed" (only_allow_merge_if_pipeline_succeeds) — without this, GitLab
+#       still shows a merge request as mergeable even when run-checks/create-project failed; the
+#       merge_when_pipeline_succeeds call below only prevents the *bot* from auto-merging a red
+#       pipeline, not a human clicking "Merge" by hand.
+#     - "All threads must be resolved" (only_allow_merge_if_all_discussions_are_resolved) —
+#       standard open-source hygiene: review comments can't be silently ignored.
+#     - Merge method: squash — keeps main's history to one commit per recipe/fix regardless of how
+#       many WIP commits a contributor pushed to their branch.
+#   Settings > Repository > Protected branches:
+#     - main: "Allowed to push" and "Allowed to merge" set to Maintainers (or stricter), "Allow
+#       force push" off. This is what actually stops someone from bypassing run-checks entirely by
+#       pushing straight to main — the CI/CD variables above only govern merge requests.
 
 stages:
     - qa
