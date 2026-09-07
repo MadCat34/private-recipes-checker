@@ -39,15 +39,23 @@ run-checks:
         - git clone --branch "$CHECKER_REF" --depth 1 https://github.com/madcat34/private-recipes-checker.git .checker
         - (cd .checker && composer install --no-dev --ansi)
     script:
-        - .checker/run lint:manifests
-        - .checker/run lint:files
-        - find * -name '*.yaml' | .checker/run lint:yaml
-        - .checker/run lint:packages
         - |
+            # Run every lint command to completion instead of stopping at the first failure, so a
+            # single pipeline run surfaces every issue across every category at once (each command
+            # still writes its own gl-code-quality-report-<command>.json regardless of its exit
+            # code). The job itself still fails overall if any of them did.
+            LINT_FAILED=0
+            .checker/run lint:manifests || LINT_FAILED=1
+            .checker/run lint:files || LINT_FAILED=1
+            find * -name '*.yaml' | .checker/run lint:yaml || LINT_FAILED=1
+            .checker/run lint:packages || LINT_FAILED=1
             if [ -n "$REQUIRED_LICENSE" ]; then
-                .checker/run lint:pull-request --license="$REQUIRED_LICENSE"
+                .checker/run lint:pull-request --license="$REQUIRED_LICENSE" || LINT_FAILED=1
             else
-                .checker/run lint:pull-request
+                .checker/run lint:pull-request || LINT_FAILED=1
+            fi
+            if [ "$LINT_FAILED" -eq 1 ]; then
+                exit 1
             fi
         - .checker/run list-unpatched-packages | xargs -r -n10 rm -rf
         - |
