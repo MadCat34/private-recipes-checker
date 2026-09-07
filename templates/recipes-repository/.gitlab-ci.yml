@@ -96,6 +96,34 @@ run-checks:
             # command's own gl-code-quality-report-*.json into a single array here, before the
             # artifacts:reports:codequality upload runs. jq was already installed by before_script.
             jq -s 'add' gl-code-quality-report-*.json > gl-code-quality-report.json 2>/dev/null || echo '[]' > gl-code-quality-report.json
+        - |
+            # The Code Quality *widget* (inline diff annotations + MR summary panel) is a GitLab
+            # Ultimate feature — on Free/Premium the report above still uploads as a plain job
+            # artifact, but nothing surfaces it on the MR itself. Post it as a sticky MR note
+            # instead, same pattern as the diff-recipe-versions note below.
+            MARKER='<!-- recipes-checker:codequality -->'
+            ISSUE_COUNT=$(jq 'length' gl-code-quality-report.json)
+            if [ "$ISSUE_COUNT" -gt 0 ]; then
+                {
+                    echo "$MARKER"
+                    echo "### Code Quality: $ISSUE_COUNT issue(s)"
+                    jq -r '.[] | "- **\(.location.path):\(.location.lines.begin)** — \(.description)"' gl-code-quality-report.json
+                } > codequality-note-body.md
+            else
+                { echo "$MARKER"; echo "### Code Quality: no issues"; } > codequality-note-body.md
+            fi
+            NOTE_ID=$(curl --silent --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
+                "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes?per_page=100" \
+                | jq -r --arg marker "$MARKER" '[.[] | select(.body | startswith($marker))][0].id // empty')
+            if [ -n "$NOTE_ID" ]; then
+                curl --silent --request PUT --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
+                    --data-urlencode "body@codequality-note-body.md" \
+                    "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes/${NOTE_ID}"
+            else
+                curl --silent --request POST --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
+                    --data-urlencode "body@codequality-note-body.md" \
+                    "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
+            fi
     artifacts:
         when: always
         reports:
