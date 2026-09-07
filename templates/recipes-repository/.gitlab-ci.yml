@@ -88,11 +88,18 @@ run-checks:
                     --data-urlencode "body@note-body.md" \
                     "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
             fi
+    after_script:
+        - |
+            # runs even when `script` failed partway through (e.g. a lint command exited non-zero
+            # and skipped the rest of the job). GitLab's codequality report uploader rejects more
+            # than one matching file ("only one file can be sent as raw"), so merge each lint
+            # command's own gl-code-quality-report-*.json into a single array here, before the
+            # artifacts:reports:codequality upload runs. jq was already installed by before_script.
+            jq -s 'add' gl-code-quality-report-*.json > gl-code-quality-report.json 2>/dev/null || echo '[]' > gl-code-quality-report.json
     artifacts:
         when: always
         reports:
-            codequality:
-                - "gl-code-quality-report-*.json"
+            codequality: gl-code-quality-report.json
 
 # This job fetches the flex/mr-* endpoint via GitLab's -/raw/ web route, unauthenticated. That
 # route rejects PRIVATE-TOKEN, Basic auth, and private_token alike on a private project (confirmed
