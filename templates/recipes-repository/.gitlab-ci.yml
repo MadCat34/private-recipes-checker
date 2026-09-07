@@ -22,6 +22,11 @@ variables:
     # SPDX identifier your recipes must declare in the MR description (e.g. "MIT"). Leave empty
     # to skip the license check entirely — lint:pull-request treats --license as optional.
     REQUIRED_LICENSE: ""
+    # The Code Quality *widget* (inline diff annotations + MR summary panel) is a GitLab Ultimate
+    # feature. Set this to "true" only if you know this instance has that widget available (e.g.
+    # a self-hosted GitLab with an Ultimate license) — run-checks will then skip posting the
+    # sticky MR note that otherwise stands in for it on Free/Premium.
+    CODEQUALITY_WIDGET_AVAILABLE: "false"
 
 run-checks:
     stage: qa
@@ -100,29 +105,33 @@ run-checks:
             # The Code Quality *widget* (inline diff annotations + MR summary panel) is a GitLab
             # Ultimate feature — on Free/Premium the report above still uploads as a plain job
             # artifact, but nothing surfaces it on the MR itself. Post it as a sticky MR note
-            # instead, same pattern as the diff-recipe-versions note below.
-            MARKER='<!-- recipes-checker:codequality -->'
-            ISSUE_COUNT=$(jq 'length' gl-code-quality-report.json)
-            if [ "$ISSUE_COUNT" -gt 0 ]; then
-                {
-                    echo "$MARKER"
-                    echo "### Code Quality: $ISSUE_COUNT issue(s)"
-                    jq -r '.[] | "- **\(.location.path):\(.location.lines.begin)** — \(.description)"' gl-code-quality-report.json
-                } > codequality-note-body.md
-            else
-                { echo "$MARKER"; echo "### Code Quality: no issues"; } > codequality-note-body.md
-            fi
-            NOTE_ID=$(curl --silent --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
-                "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes?per_page=100" \
-                | jq -r --arg marker "$MARKER" '[.[] | select(.body | startswith($marker))][0].id // empty')
-            if [ -n "$NOTE_ID" ]; then
-                curl --silent --request PUT --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
-                    --data-urlencode "body@codequality-note-body.md" \
-                    "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes/${NOTE_ID}"
-            else
-                curl --silent --request POST --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
-                    --data-urlencode "body@codequality-note-body.md" \
-                    "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
+            # instead, same pattern as the diff-recipe-versions note below, unless this instance
+            # is known to have the widget (CODEQUALITY_WIDGET_AVAILABLE), where the note would
+            # just duplicate it.
+            if [ "$CODEQUALITY_WIDGET_AVAILABLE" != "true" ]; then
+                MARKER='<!-- recipes-checker:codequality -->'
+                ISSUE_COUNT=$(jq 'length' gl-code-quality-report.json)
+                if [ "$ISSUE_COUNT" -gt 0 ]; then
+                    {
+                        echo "$MARKER"
+                        echo "### Code Quality: $ISSUE_COUNT issue(s)"
+                        jq -r '.[] | "- **\(.location.path):\(.location.lines.begin)** — \(.description)"' gl-code-quality-report.json
+                    } > codequality-note-body.md
+                else
+                    { echo "$MARKER"; echo "### Code Quality: no issues"; } > codequality-note-body.md
+                fi
+                NOTE_ID=$(curl --silent --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
+                    "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes?per_page=100" \
+                    | jq -r --arg marker "$MARKER" '[.[] | select(.body | startswith($marker))][0].id // empty')
+                if [ -n "$NOTE_ID" ]; then
+                    curl --silent --request PUT --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
+                        --data-urlencode "body@codequality-note-body.md" \
+                        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes/${NOTE_ID}"
+                else
+                    curl --silent --request POST --header "PRIVATE-TOKEN: ${VCS_TOKEN}" \
+                        --data-urlencode "body@codequality-note-body.md" \
+                        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
+                fi
             fi
     artifacts:
         when: always
