@@ -194,6 +194,13 @@ final class LintFilesCommand extends Command
     {
         $hasErrors = false;
         foreach ($this->finder($baseDir)->directories()->depth('== 2') as $dir) {
+            // Depth alone is not enough: generated trees such as flex-endpoint/archived/<pkg>/
+            // also sit at depth 2. A recipe's third segment is a version directory ("1.0"), which
+            // is what tells one apart — the same "x.y" shape lint:packages enforces.
+            if (!preg_match('{^[^/]+/[^/]+/\d+\.\d+$}', $dir->getRelativePathname())) {
+                continue;
+            }
+
             if (!is_file($dir->getPathname().'/manifest.json')) {
                 $this->errorReporter->reportError('Recipes must define a "manifest.json" file', $dir->getRelativePathname());
                 $hasErrors = true;
