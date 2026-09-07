@@ -248,11 +248,15 @@ flex-update-archived:
     script:
         - |
             git checkout "$CI_DEFAULT_BRANCH"
-            mkdir archived
-            php .checker/run generate:archived-recipes . "$CI_DEFAULT_BRANCH" archived
+            # Generated outside the working tree switch below picks up: flex/main already has its
+            # own tracked archived/ (from a previous run), and git switch refuses to change branch
+            # over untracked files it would otherwise overwrite.
+            mkdir /tmp/archived-endpoint
+            php .checker/run generate:archived-recipes . "$CI_DEFAULT_BRANCH" /tmp/archived-endpoint
             git fetch origin flex/main
             git switch flex/main
-            cp -a archived .
+            rm -rf archived
+            cp -a /tmp/archived-endpoint archived
             git add archived/
             git commit -m 'Update Flex archives' || true
             git push -f "https://gitlab-ci-token:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" flex/main
