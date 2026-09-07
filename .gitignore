@@ -2,3 +2,5 @@
 /.phpunit.result.cache
 /.worktrees
 /.superpowers
+docs/superpowers
+AUDIT.md
