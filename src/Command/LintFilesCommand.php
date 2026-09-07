@@ -47,10 +47,25 @@ final class LintFilesCommand extends Command
         return $hasErrors ? Command::FAILURE : Command::SUCCESS;
     }
 
+    /**
+     * Every check goes through here so an exclusion is added once, not twelve times. Dependency
+     * directories are not recipe content; linting them produced hundreds of false positives.
+     *
+     * Deliberately not ignoreVCSIgnored(): a recipes repository's .gitignore may legitimately
+     * cover files we still want linted, and the lint's behavior should not depend on it.
+     */
+    private function finder(string $baseDir): Finder
+    {
+        return (new Finder())
+            ->in($baseDir)
+            ->exclude(['vendor', 'node_modules'])
+        ;
+    }
+
     private function checkNoSymlinks(string $baseDir): bool
     {
         $hasErrors = false;
-        foreach ((new Finder())->in($baseDir) as $fileInfo) {
+        foreach ($this->finder($baseDir) as $fileInfo) {
             if (is_link($fileInfo->getPathname())) {
                 $this->errorReporter->reportError('Symlinks are not allowed', $fileInfo->getRelativePathname());
                 $hasErrors = true;
@@ -63,7 +78,7 @@ final class LintFilesCommand extends Command
     private function checkNoYmlExtension(string $baseDir): bool
     {
         $hasErrors = false;
-        foreach ((new Finder())->in($baseDir)->files()->name('*.yml') as $file) {
+        foreach ($this->finder($baseDir)->files()->name('*.yml') as $file) {
             $this->errorReporter->reportError('*.yaml files should be used instead of *.yml', $file->getRelativePathname());
             $hasErrors = true;
         }
@@ -74,7 +89,7 @@ final class LintFilesCommand extends Command
     private function checkNoGitkeep(string $baseDir): bool
     {
         $hasErrors = false;
-        foreach ((new Finder())->in($baseDir)->ignoreDotFiles(false)->files()->name('.gitkeep') as $file) {
+        foreach ($this->finder($baseDir)->ignoreDotFiles(false)->files()->name('.gitkeep') as $file) {
             $this->errorReporter->reportError('.gitkeep files should be renamed to .gitignore', $file->getRelativePathname());
             $hasErrors = true;
         }
@@ -85,7 +100,7 @@ final class LintFilesCommand extends Command
     private function checkIndentation(string $baseDir): bool
     {
         $hasErrors = false;
-        foreach ((new Finder())->in($baseDir)->files()->name(['*.yaml', '*.json']) as $file) {
+        foreach ($this->finder($baseDir)->files()->name(['*.yaml', '*.json']) as $file) {
             foreach (explode("\n", $file->getContents()) as $i => $line) {
                 if (!preg_match('/^((    )*[^ \t]|$)/', $line)) {
                     $this->errorReporter->reportError('Indentation must be a multiple of 4 spaces', $file->getRelativePathname(), $i + 1);
@@ -101,7 +116,7 @@ final class LintFilesCommand extends Command
     {
         $hasErrors = false;
         $extensions = ['*.yaml', '*.yml', '*.txt', '*.md', '*.markdown', '*.json', '*.rst', '*.php', '*.js', '*.css', '*.twig'];
-        foreach ((new Finder())->in($baseDir)->files()->name($extensions) as $file) {
+        foreach ($this->finder($baseDir)->files()->name($extensions) as $file) {
             $contents = $file->getContents();
             if ('' !== $contents && "\n" !== substr($contents, -1)) {
                 $line = substr_count($contents, "\n") + 1;
@@ -116,7 +131,7 @@ final class LintFilesCommand extends Command
     private function checkHttpsForSymfonyCom(string $baseDir): bool
     {
         $hasErrors = false;
-        foreach ((new Finder())->in($baseDir)->files() as $file) {
+        foreach ($this->finder($baseDir)->files() as $file) {
             foreach (explode("\n", $file->getContents()) as $i => $line) {
                 if (preg_match('{http://.*symfony\.com}', $line)) {
                     $this->errorReporter->reportError('Use https when referencing symfony.com', $file->getRelativePathname(), $i + 1);
@@ -131,7 +146,7 @@ final class LintFilesCommand extends Command
     private function checkUnderscoreNotationUnderConfig(string $baseDir): bool
     {
         $hasErrors = false;
-        foreach ((new Finder())->in($baseDir)->files() as $file) {
+        foreach ($this->finder($baseDir)->files() as $file) {
             $relative = $file->getRelativePathname();
             if (!preg_match('{^[^/]+/[^/]+/[^/]+/config/}', $relative)) {
                 continue;
@@ -148,7 +163,7 @@ final class LintFilesCommand extends Command
     private function checkNoTildeNulls(string $baseDir): bool
     {
         $hasErrors = false;
-        foreach ((new Finder())->in($baseDir)->files()->name(['*.yaml', '*.yml']) as $file) {
+        foreach ($this->finder($baseDir)->files()->name(['*.yaml', '*.yml']) as $file) {
             foreach (explode("\n", $file->getContents()) as $i => $line) {
                 if (str_contains($line, ': ~')) {
                     $this->errorReporter->reportError('"~" should be replaced with "null"', $file->getRelativePathname(), $i + 1);
@@ -163,7 +178,7 @@ final class LintFilesCommand extends Command
     private function checkNoConsoleInMakefile(string $baseDir): bool
     {
         $hasErrors = false;
-        foreach ((new Finder())->in($baseDir)->files()->name('Makefile') as $file) {
+        foreach ($this->finder($baseDir)->files()->name('Makefile') as $file) {
             foreach (explode("\n", $file->getContents()) as $i => $line) {
                 if (preg_match('{bin/console|\$\(CONSOLE\)}', $line)) {
                     $this->errorReporter->reportError('Symfony commands should not be wrapped in a Makefile', $file->getRelativePathname(), $i + 1);
@@ -178,7 +193,14 @@ final class LintFilesCommand extends Command
     private function checkManifestJsonExists(string $baseDir): bool
     {
         $hasErrors = false;
-        foreach ((new Finder())->in($baseDir)->directories()->depth('== 2') as $dir) {
+        foreach ($this->finder($baseDir)->directories()->depth('== 2') as $dir) {
+            // Depth alone is not enough: generated trees such as flex-endpoint/archived/<pkg>/
+            // also sit at depth 2. A recipe's third segment is a version directory ("1.0"), which
+            // is what tells one apart — the same "x.y" shape lint:packages enforces.
+            if (!preg_match('{^[^/]+/[^/]+/\d+\.\d+$}', $dir->getRelativePathname())) {
+                continue;
+            }
+
             if (!is_file($dir->getPathname().'/manifest.json')) {
                 $this->errorReporter->reportError('Recipes must define a "manifest.json" file', $dir->getRelativePathname());
                 $hasErrors = true;
@@ -191,7 +213,7 @@ final class LintFilesCommand extends Command
     private function checkJsonFilesAreValid(string $baseDir): bool
     {
         $hasErrors = false;
-        foreach ((new Finder())->in($baseDir)->files()->name('*.json') as $file) {
+        foreach ($this->finder($baseDir)->files()->name('*.json') as $file) {
             json_decode($file->getContents());
             if (\JSON_ERROR_NONE !== json_last_error()) {
                 $this->errorReporter->reportError(sprintf('File is not valid JSON: %s', json_last_error_msg()), $file->getRelativePathname());
@@ -205,7 +227,7 @@ final class LintFilesCommand extends Command
     private function checkNoParametersKeyInPackagesConfig(string $baseDir): bool
     {
         $hasErrors = false;
-        foreach ((new Finder())->in($baseDir)->files()->name(['*.yaml', '*.yml']) as $file) {
+        foreach ($this->finder($baseDir)->files()->name(['*.yaml', '*.yml']) as $file) {
             if (!preg_match('{^[^/]+/[^/]+/[^/]+/config/packages/}', $file->getRelativePathname())) {
                 continue;
             }

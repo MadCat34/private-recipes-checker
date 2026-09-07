@@ -81,6 +81,7 @@ class LintManifestsCommand extends Command
             }
             if ($empty && !is_file("$package/$version/post-install.txt") && ['all'] === current($data['bundles'] ?? [])) {
                 $this->errorReporter->reportError('Recipe is not needed as it only registers a bundle for all environments', $manifest);
+                $hasErrors = true;
                 continue;
             }
 

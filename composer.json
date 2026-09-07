@@ -1,5 +1,5 @@
 {
-    "name": "madcat34/private-recipe-checker",
+    "name": "madcat34/private-recipes-checker",
     "type": "project",
     "description": "Multi-VCS, multi-registry Symfony Flex recipe checker for private company recipes.",
     "license": "AGPL-3.0-or-later",

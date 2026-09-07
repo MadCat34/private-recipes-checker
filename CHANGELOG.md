@@ -34,7 +34,7 @@ AGPLv3 §5(a).
   hardcoded Packagist URL.
 - `generate:recipes-readme`: header is now configurable via `readme.header`.
 - `composer.json`: dependencies bumped to current major versions, `"license"` corrected from the
-  incorrect `"MIT"` to `"AGPL-3.0-or-later"`, package renamed to `madcat34/private-recipe-checker`.
+  incorrect `"MIT"` to `"AGPL-3.0-or-later"`, package renamed to `madcat34/private-recipes-checker`.
 
 ### Removed
 

@@ -142,4 +142,22 @@ class LintManifestsCommandTest extends TestCase
 
         $this->assertEmpty(array_filter($errors, fn (array $e) => str_contains($e['message'], 'is not needed')));
     }
+
+    public function testAnUnneededRecipeFailsTheCommand(): void
+    {
+        // A recipe whose manifest only registers a bundle for all environments is redundant —
+        // Flex registers it automatically. Reporting it without failing left the pipeline green.
+        $this->writeRecipe('acme/private-bundle', '1.0', [
+            'bundles' => ['Acme\\PrivateBundle\\AcmeBundle' => ['all']],
+        ]);
+
+        $reporter = new RecordingErrorReporter();
+        $tester = new CommandTester(new LintManifestsCommand($reporter, $this->manifestValidator));
+        $exitCode = $tester->execute([]);
+
+        $this->assertCount(1, $reporter->errors);
+        $this->assertSame('Recipe is not needed as it only registers a bundle for all environments', $reporter->errors[0]['message']);
+        $this->assertSame('acme/private-bundle/1.0/manifest.json', $reporter->errors[0]['file']);
+        $this->assertSame(1, $exitCode);
+    }
 }

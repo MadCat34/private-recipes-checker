@@ -22,6 +22,12 @@ use Symfony\Component\Process\Process;
 #[AsCommand(name: 'diff-recipe-versions', description: 'Displays the diff between versions of a recipe')]
 class DiffRecipeVersionsCommand extends Command
 {
+    /** @param resource $inputStream defaults to real stdin; overridable so tests can inject a fake stream */
+    public function __construct(private $inputStream = \STDIN)
+    {
+        parent::__construct();
+    }
+
     protected function configure(): void
     {
         $this
@@ -34,7 +40,7 @@ class DiffRecipeVersionsCommand extends Command
         $packages = [];
         $requires = [];
 
-        while (false !== $package = fgets(\STDIN)) {
+        while (false !== $package = fgets($this->inputStream)) {
             $package = substr($package, 0, -1);
 
             $versions = scandir($package, \SCANDIR_SORT_NONE);

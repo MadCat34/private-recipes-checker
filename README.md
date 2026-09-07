@@ -96,12 +96,26 @@ Create a `.recipes-checker.yaml` at the root of your recipes repository:
 ```yaml
 registry:
   type: packagist # or "artifactory"
-  # url: https://artifactory.example.com/artifactory/api/composer/my-repo # artifactory only
-  # token: "%env(ARTIFACTORY_TOKEN)%"                                     # artifactory only
+
+  # artifactory only — required:
+  # url: https://mycompany.jfrog.io/artifactory/api/composer/my-repo
+  # browse_url_template: https://mycompany.jfrog.io/ui/repos/tree/General/my-repo/%package%
+
+  # artifactory only — optional, defaults to "%url%/p2/%package%.json":
+  # metadata_url_template: "%url%/p2/%package%.json"
 
 readme:
   header: "# My Company's Private Recipes" # optional, used by generate:recipes-readme
 ```
+
+Authentication against a private registry is **not** configured in this file: set the
+`REGISTRY_TOKEN` environment variable instead, and it is sent as `Authorization: Bearer <token>`.
+Keeping it out of the YAML keeps the secret out of the repository.
+
+`browse_url_template` and `metadata_url_template` both substitute `%package%` (and
+`metadata_url_template` also substitutes `%url%`). `browse_url_template` is required for
+Artifactory: it produces the per-package links in the `RECIPES.md` that `generate:recipes-readme`
+writes.
 
 The VCS (GitHub Actions or GitLab CI) is auto-detected from the CI environment — no configuration
 needed there.
@@ -125,6 +139,30 @@ Ready-to-copy CI pipelines for a private recipes repository live under
 Both templates pin the checker via a `CHECKER_REF` variable/input — set it to a tagged release
 once you've cut one, rather than tracking `main` unversioned (see "why it is not expected to be
 upstreamed" below for why that matters).
+
+## Known limitations
+
+**GitLab raw file URLs are not consumable by Flex.** `GitLabProvider::getRawFileUrl()` builds
+`repository/files/…/raw` API URLs, which land in the published `index.json`. Flex resolves each
+per-package recipe by textually swapping `index.json` for `{package}.json`, which assumes sibling
+files under one directory — a property the API URL shape does not have. Those URLs also carry no
+token, so they return 401 on a private repository. The shipped `.gitlab-ci.yml` works around this
+by serving the endpoint from the `-/raw/` web route, which requires the recipes repository (or at
+least its `flex/*` branches) to be public. See commit `2b8b1ba` for the full analysis. Fixing this
+properly means reworking the `VcsProvider` contract and is tracked separately.
+
+**Verification status.** Not every supported path has been exercised against a live system:
+
+| Path | Status |
+| --- | --- |
+| GitLab CI | verified against a real project |
+| Packagist | verified |
+| GitHub Actions | not verified — the workflow template has never run |
+| JFrog Artifactory | not verified — no live instance exercised |
+
+The unverified paths are implemented and unit-tested, but their tests assert that the code does
+what it says, not that what it says matches the remote system. Treat them as a starting point
+rather than a guarantee.
 
 ## Development
 

@@ -60,6 +60,16 @@ class LintPackagesCommand extends Command
 
             $data = $response->toArray();
 
+            // A 200 does not guarantee the shape we expect: registries other than Packagist may
+            // answer with their own layout. Dereferencing blindly produced PHP warnings and then
+            // an error blaming the package for not existing.
+            if (!isset($data['packages'][$package]) || !\is_array($data['packages'][$package])) {
+                $this->errorReporter->reportError(sprintf('Registry returned an unexpected response for package "%s" (no "packages" entry)', $package));
+                $hasErrors = true;
+
+                continue;
+            }
+
             foreach (glob("$package/*") as $version) {
                 $version = substr($version, 1 + \strlen($package));
 

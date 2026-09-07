@@ -35,6 +35,7 @@ class GenerateArchivedRecipesCommand extends Command
             ->addArgument('directory', InputArgument::REQUIRED, 'Path to the local recipes repository')
             ->addArgument('branch', InputArgument::REQUIRED, 'Branch on the recipes repository to use')
             ->addArgument('output_directory', InputArgument::REQUIRED, 'The directory where generated files should be stored')
+            ->addArgument('repository', InputArgument::REQUIRED, 'The name of the repository (e.g. "acme/recipes"), recorded in the archived files\' _links')
         ;
     }
 
@@ -43,12 +44,32 @@ class GenerateArchivedRecipesCommand extends Command
         $recipesDirectory = $input->getArgument('directory');
         $branch = $input->getArgument('branch');
         $outputDir = $input->getArgument('output_directory');
+        $repository = $input->getArgument('repository');
         $checkerRoot = $this->checkerRoot ?? realpath(__DIR__.'/../..');
         $filesystem = new Filesystem();
 
         if (!file_exists($recipesDirectory)) {
             throw new \InvalidArgumentException(sprintf('Cannot find directory "%s"', $recipesDirectory));
         }
+
+        // This command checks out every commit of $recipesDirectory in turn, so uncommitted work
+        // there would be silently discarded by the very first checkout. Refuse rather than destroy.
+        //
+        // --untracked-files=no on purpose: a `git checkout` never touches untracked files, so they
+        // are not at risk and must not trip this guard. This also matters operationally: the
+        // project's own templates/recipes-repository/.gitlab-ci.yml (flex-update-archived job)
+        // clones the checker into an untracked ".checker/" directory inside the recipes repository
+        // before running this command against ".". A stricter check here would report "?? .checker/"
+        // and make that shipped CI job fail (silently, since it runs with allow_failure: true) for
+        // every adopter of the template.
+        $status = (new Process(['git', 'status', '--porcelain', '--untracked-files=no'], $recipesDirectory))->mustRun();
+        if ('' !== trim($status->getOutput())) {
+            throw new \RuntimeException(sprintf('The repository at "%s" has uncommitted changes. Commit or stash them first: this command checks out every commit in turn and would discard them.', $recipesDirectory));
+        }
+
+        // Remembered so the finally below can put the repository back where the user left it —
+        // the loop walks history with detaching checkouts and would otherwise strand it there.
+        $startingRef = trim((new Process(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], $recipesDirectory))->mustRun()->getOutput());
 
         $process = new Process(['git', 'checkout', $branch], $recipesDirectory);
         $process->mustRun();
@@ -63,25 +84,39 @@ class GenerateArchivedRecipesCommand extends Command
         // an imperfect estimate of the total commits
         $totalCommits = (int) trim($process->getOutput());
         $progress = new ProgressBar($output, $totalCommits);
-        while (true) {
-            // most arguments to the command do not matter for us and so are hardcoded
-            $process = Process::fromShellCommandline(
-                sprintf('git ls-tree HEAD */*/* | php %s/run generate:flex-endpoint symfony/recipes master flex/main $OUTPUT_DIR', $checkerRoot),
-                $recipesDirectory
-            );
-            // this WILL occasionally fail: some legacy recipes were invalid and pointed to non-existent files
-            $process->run(null, ['OUTPUT_DIR' => $tmpDir]);
 
-            $process = new Process(['git', 'checkout', 'HEAD^1'], $recipesDirectory);
-            $process->mustRun();
+        try {
+            while (true) {
+                // most arguments to the command do not matter for us and so are hardcoded
+                $process = Process::fromShellCommandline(
+                    sprintf(
+                        'git ls-tree HEAD */*/* | php %s generate:flex-endpoint %s %s flex/main $OUTPUT_DIR',
+                        escapeshellarg($checkerRoot.'/run'),
+                        escapeshellarg($repository),
+                        escapeshellarg($branch),
+                    ),
+                    $recipesDirectory
+                );
+                // this WILL occasionally fail: some legacy recipes were invalid and pointed to non-existent files
+                $process->run(null, ['OUTPUT_DIR' => $tmpDir]);
 
-            $process = (new Process(['git', 'rev-list', '--count', 'HEAD', '--no-merges'], $recipesDirectory))->mustRun();
-            $newCount = (int) trim($process->getOutput());
-            // when we've come to the final commit, this will be 1
-            if (1 === $newCount) {
-                break;
+                // Checked before descending: on the root commit HEAD^1 does not exist, and the
+                // old order tried the checkout first, surfacing a raw git pathspec error.
+                $process = (new Process(['git', 'rev-list', '--count', 'HEAD', '--no-merges'], $recipesDirectory))->mustRun();
+                $remainingCommits = (int) trim($process->getOutput());
+                if ($remainingCommits <= 1) {
+                    break;
+                }
+
+                $process = new Process(['git', 'checkout', 'HEAD^1'], $recipesDirectory);
+                $process->mustRun();
+
+                $progress->setProgress($totalCommits - $remainingCommits);
             }
-            $progress->setProgress($totalCommits - $newCount);
+        } finally {
+            // Covers the exception path too: a failed checkout mid-walk must not leave the user's
+            // repository detached on some arbitrary commit.
+            (new Process(['git', 'checkout', $startingRef], $recipesDirectory))->run();
         }
 
         $filesystem->mirror($tmpDir.'/archived', $outputDir);

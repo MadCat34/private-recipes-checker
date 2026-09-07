@@ -14,7 +14,7 @@ final class ArtifactoryProvider implements PackageRegistryProvider
     public function __construct(
         private string $url,
         private string $metadataUrlTemplate,
-        private ?string $browseUrlTemplate,
+        private string $browseUrlTemplate,
         private ?string $token,
     ) {
     }
@@ -25,12 +25,19 @@ final class ArtifactoryProvider implements PackageRegistryProvider
             throw new \RuntimeException('The "registry.url" key is required when registry.type is "artifactory".');
         }
 
+        // No sensible default exists: the fallback used to be the registry URL itself, which
+        // contains no %package%, so every package in the generated RECIPES.md linked to the same
+        // page. The JFrog UI URL shape varies between instances, so guessing is worse than asking.
+        if (!isset($config['browse_url_template'])) {
+            throw new \RuntimeException('The "registry.browse_url_template" key is required when registry.type is "artifactory".');
+        }
+
         $token = getenv('REGISTRY_TOKEN');
 
         return new static(
             $config['url'],
             $config['metadata_url_template'] ?? '%url%/p2/%package%.json',
-            $config['browse_url_template'] ?? null,
+            $config['browse_url_template'],
             false !== $token ? $token : null,
         );
     }
@@ -49,6 +56,6 @@ final class ArtifactoryProvider implements PackageRegistryProvider
 
     public function getPackageBrowseUrl(string $package): string
     {
-        return str_replace('%package%', $package, $this->browseUrlTemplate ?? $this->url);
+        return str_replace('%package%', $package, $this->browseUrlTemplate);
     }
 }

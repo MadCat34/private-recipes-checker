@@ -4,6 +4,7 @@ namespace App\Tests\Vcs;
 
 use App\ErrorReporter\PlainTextErrorReporter;
 use App\Vcs\NullVcsProvider;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Output\BufferedOutput;
 
@@ -26,7 +27,7 @@ class NullVcsProviderTest extends TestCase
         $this->assertInstanceOf(PlainTextErrorReporter::class, $provider->createErrorReporter());
     }
 
-    /** @dataProvider unavailableMethodProvider */
+    #[DataProvider('unavailableMethodProvider')]
     public function testMethodsRequiringACiEnvironmentThrow(callable $call): void
     {
         $this->expectException(\LogicException::class);

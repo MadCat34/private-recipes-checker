@@ -8,7 +8,7 @@ on:
                 required: false
                 type: string
             checker_ref:
-                description: 'madcat34/private-recipe-checker git ref to use — pin to a tagged release once you have picked one'
+                description: 'madcat34/private-recipes-checker git ref to use — pin to a tagged release once you have picked one'
                 default: main
                 required: false
                 type: string
@@ -45,9 +45,9 @@ jobs:
                     git config --global user.name "github-action[bot]"
                     cd .github
                     rm -rf recipes-checker.zip recipes-checker-main
-                    wget -q -O recipes-checker.zip "https://codeload.github.com/madcat34/private-recipe-checker/zip/refs/heads/${{ inputs.checker_ref }}"
+                    wget -q -O recipes-checker.zip "https://codeload.github.com/madcat34/private-recipes-checker/zip/refs/heads/${{ inputs.checker_ref }}"
                     unzip -q recipes-checker.zip
-                    mv private-recipe-checker-* recipes-checker-main
+                    mv private-recipes-checker-* recipes-checker-main
                     cd recipes-checker-main
                     composer install --ansi --no-dev
 

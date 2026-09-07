@@ -54,12 +54,12 @@ class GenerateArchivedRecipesCommandTest extends TestCase
         );
 
         $this->initGitRepo($repoDir, [
-            [], // root commit — the loop always checks out HEAD^1, so it needs one to land on
+            [], // an extra commit, so this exercises the multi-commit walk rather than the single-commit exit
             ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
         ]);
 
         $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
-        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir]);
+        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
 
         $this->assertSame(0, $exitCode);
         $this->assertFileExists($outputDir.'/marker.json');
@@ -87,7 +87,7 @@ class GenerateArchivedRecipesCommandTest extends TestCase
         ]);
 
         $tester = new CommandTester(new GenerateArchivedRecipesCommand());
-        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir]);
+        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
 
         putenv('GITHUB_ACTIONS');
 
@@ -98,5 +98,208 @@ class GenerateArchivedRecipesCommandTest extends TestCase
         $this->assertNotEmpty(glob($outputDir.'/acme.private-bundle/*.json'));
 
         $filesystem->remove([$repoDir, $outputDir]);
+    }
+
+    public function testRestoresTheStartingBranchOnSuccess(): void
+    {
+        $filesystem = new Filesystem();
+        $repoDir = sys_get_temp_dir().'/archived-restore-test-'.uniqid();
+        $checkerRoot = sys_get_temp_dir().'/archived-restore-checker-'.uniqid();
+        $outputDir = sys_get_temp_dir().'/archived-restore-out-'.uniqid();
+        $filesystem->mkdir([$repoDir, $checkerRoot, $outputDir]);
+
+        file_put_contents($checkerRoot.'/run', <<<'PHP'
+            <?php
+            $outputDir = getenv('OUTPUT_DIR');
+            @mkdir($outputDir.'/archived', 0777, true);
+            file_put_contents($outputDir.'/archived/marker.json', '{}');
+            PHP
+        );
+
+        $this->initGitRepo($repoDir, [
+            [],
+            ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
+        ]);
+
+        $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
+        $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
+
+        $branch = (new Process(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], $repoDir))->mustRun()->getOutput();
+        $this->assertSame('main', trim($branch), 'the command left the repository on a detached HEAD');
+
+        $filesystem->remove([$repoDir, $checkerRoot, $outputDir]);
+    }
+
+    public function testHandlesARepositoryWithASingleCommit(): void
+    {
+        $filesystem = new Filesystem();
+        $repoDir = sys_get_temp_dir().'/archived-single-test-'.uniqid();
+        $checkerRoot = sys_get_temp_dir().'/archived-single-checker-'.uniqid();
+        $outputDir = sys_get_temp_dir().'/archived-single-out-'.uniqid();
+        $filesystem->mkdir([$repoDir, $checkerRoot, $outputDir]);
+
+        file_put_contents($checkerRoot.'/run', <<<'PHP'
+            <?php
+            $outputDir = getenv('OUTPUT_DIR');
+            @mkdir($outputDir.'/archived', 0777, true);
+            file_put_contents($outputDir.'/archived/marker.json', '{}');
+            PHP
+        );
+
+        // A single commit: the loop must not attempt HEAD^1, which does not exist.
+        $this->initGitRepo($repoDir, [
+            ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
+        ]);
+
+        $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
+        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
+
+        $this->assertSame(0, $exitCode);
+        $this->assertFileExists($outputDir.'/marker.json');
+
+        $filesystem->remove([$repoDir, $checkerRoot, $outputDir]);
+    }
+
+    public function testWorksWhenTheCheckerRootContainsASpace(): void
+    {
+        $filesystem = new Filesystem();
+        $repoDir = sys_get_temp_dir().'/archived-space-test-'.uniqid();
+        // The space is the point: unescaped, the shell splits this into two arguments.
+        $checkerRoot = sys_get_temp_dir().'/archived space checker-'.uniqid();
+        $outputDir = sys_get_temp_dir().'/archived-space-out-'.uniqid();
+        $filesystem->mkdir([$repoDir, $checkerRoot, $outputDir]);
+
+        file_put_contents($checkerRoot.'/run', <<<'PHP'
+            <?php
+            $outputDir = getenv('OUTPUT_DIR');
+            @mkdir($outputDir.'/archived', 0777, true);
+            file_put_contents($outputDir.'/archived/marker.json', '{}');
+            PHP
+        );
+
+        $this->initGitRepo($repoDir, [
+            [],
+            ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
+        ]);
+
+        $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
+        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
+
+        $this->assertSame(0, $exitCode);
+        $this->assertFileExists($outputDir.'/marker.json');
+
+        $filesystem->remove([$repoDir, $checkerRoot, $outputDir]);
+    }
+
+    public function testRefusesToRunAgainstADirtyWorkingTree(): void
+    {
+        $filesystem = new Filesystem();
+        $repoDir = sys_get_temp_dir().'/archived-dirty-test-'.uniqid();
+        $outputDir = sys_get_temp_dir().'/archived-dirty-out-'.uniqid();
+        $filesystem->mkdir([$repoDir, $outputDir]);
+
+        $this->initGitRepo($repoDir, [
+            [],
+            ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
+        ]);
+
+        // Uncommitted work the initial `git checkout` would silently discard.
+        file_put_contents($repoDir.'/acme/private-bundle/1.0/manifest.json', json_encode(['container' => ['x' => 999]]));
+
+        $tester = new CommandTester(new GenerateArchivedRecipesCommand());
+
+        try {
+            $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
+            $this->fail('the command should refuse to run against a dirty working tree');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('uncommitted changes', $e->getMessage());
+        }
+
+        // The user's work is untouched.
+        $contents = file_get_contents($repoDir.'/acme/private-bundle/1.0/manifest.json');
+        $this->assertStringContainsString('999', $contents);
+
+        $filesystem->remove([$repoDir, $outputDir]);
+    }
+
+    public function testDoesNotRefuseOnUntrackedFilesLikeTheShippedGitlabTemplate(): void
+    {
+        // The shipped flex-update-archived job (templates/recipes-repository/.gitlab-ci.yml) clones
+        // the checker into .checker/ inside the recipes repository's own working tree before running
+        // this command against ".". That leaves an untracked directory that `git status --porcelain`
+        // reports as "?? .checker/" — but an untracked directory is never at risk from the
+        // `git checkout` calls this command makes, so it must not block the run.
+        $filesystem = new Filesystem();
+        $repoDir = sys_get_temp_dir().'/archived-untracked-test-'.uniqid();
+        $checkerRoot = sys_get_temp_dir().'/archived-untracked-checker-'.uniqid();
+        $outputDir = sys_get_temp_dir().'/archived-untracked-out-'.uniqid();
+        $filesystem->mkdir([$repoDir, $checkerRoot, $outputDir]);
+
+        file_put_contents($checkerRoot.'/run', <<<'PHP'
+            <?php
+            $outputDir = getenv('OUTPUT_DIR');
+            @mkdir($outputDir.'/archived', 0777, true);
+            file_put_contents($outputDir.'/archived/marker.json', '{}');
+            PHP
+        );
+
+        $this->initGitRepo($repoDir, [
+            [],
+            ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
+        ]);
+
+        // Mirrors the CI template: an untracked ".checker/" directory sitting inside the repository
+        // being processed, as `git clone ... .checker` would produce.
+        $filesystem->mkdir($repoDir.'/.checker');
+        $filesystem->dumpFile($repoDir.'/.checker/marker.txt', 'untracked');
+
+        $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
+        $exitCode = $tester->execute(['directory' => $repoDir, 'branch' => 'main', 'output_directory' => $outputDir, 'repository' => 'acme/private-recipes']);
+
+        $this->assertSame(0, $exitCode);
+        $this->assertFileExists($outputDir.'/marker.json');
+
+        $filesystem->remove([$repoDir, $checkerRoot, $outputDir]);
+    }
+
+    public function testPassesTheRepositoryThroughToTheEndpointGenerator(): void
+    {
+        $filesystem = new Filesystem();
+        $repoDir = sys_get_temp_dir().'/archived-repo-arg-test-'.uniqid();
+        $checkerRoot = sys_get_temp_dir().'/archived-repo-arg-checker-'.uniqid();
+        $outputDir = sys_get_temp_dir().'/archived-repo-arg-out-'.uniqid();
+        $filesystem->mkdir([$repoDir, $checkerRoot, $outputDir]);
+
+        // The fake "run" records the arguments it was handed, so the test can assert that the
+        // caller no longer hardcodes symfony/recipes.
+        file_put_contents($checkerRoot.'/run', <<<'PHP'
+            <?php
+            $outputDir = getenv('OUTPUT_DIR');
+            @mkdir($outputDir.'/archived', 0777, true);
+            file_put_contents($outputDir.'/archived/args.json', json_encode(array_slice($argv, 1)));
+            PHP
+        );
+
+        $this->initGitRepo($repoDir, [
+            [],
+            ['acme/private-bundle/1.0/manifest.json' => json_encode(['container' => ['x' => 1]])],
+        ]);
+
+        $tester = new CommandTester(new GenerateArchivedRecipesCommand($checkerRoot));
+        $tester->execute([
+            'directory' => $repoDir,
+            'branch' => 'main',
+            'output_directory' => $outputDir,
+            'repository' => 'acme/private-recipes',
+        ]);
+
+        $args = json_decode(file_get_contents($outputDir.'/args.json'), true);
+
+        $this->assertSame('generate:flex-endpoint', $args[0]);
+        $this->assertSame('acme/private-recipes', $args[1]);
+        $this->assertSame('main', $args[2]);
+        $this->assertNotContains('symfony/recipes', $args);
+
+        $filesystem->remove([$repoDir, $checkerRoot, $outputDir]);
     }
 }

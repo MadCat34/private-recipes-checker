@@ -252,7 +252,7 @@ flex-update-archived:
             # own tracked archived/ (from a previous run), and git switch refuses to change branch
             # over untracked files it would otherwise overwrite.
             mkdir /tmp/archived-endpoint
-            php .checker/run generate:archived-recipes . "$CI_DEFAULT_BRANCH" /tmp/archived-endpoint
+            php .checker/run generate:archived-recipes . "$CI_DEFAULT_BRANCH" /tmp/archived-endpoint "$CI_PROJECT_PATH"
             git fetch origin flex/main
             git switch flex/main
             rm -rf archived
