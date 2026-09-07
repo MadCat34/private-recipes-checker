@@ -1,3 +1,21 @@
+# Required repository settings, none of which live in this file (GitHub doesn't version them as
+# YAML) — set them once per repository:
+#   Settings > Branches > Branch protection rule (for the default branch):
+#     - Require status checks to pass before merging, with BOTH "call-qa / Run checks" AND
+#       "call-qa / Run updated recipes" listed. Both, not just the first one: this workflow's
+#       "Enable Automerge" step runs inside "Run checks" and only requests a squash-merge —
+#       GitHub actually merges once every *required* check is green. Omit "Run updated recipes"
+#       and the merge can land the moment "Run checks" passes, before "Run updated recipes" has
+#       read the flex/pull-<N> testing endpoint — which the merge's own Cleanup workflow
+#       (pull_request_target: types: [closed]) may then delete out from under it, mid-read.
+#   Settings > General > Pull Requests:
+#     - "Allow auto-merge" — without it, `gh pr merge --auto` in "Run checks" fails outright
+#       ("Auto merge is not allowed for this repository") and every later step in the job is
+#       skipped along with it (they all gate on the Checkout step, not this one, but a merge that
+#       silently never happens is easy to miss).
+#     - Squash merging enabled (and merge/rebase merging disabled, to match GitLab's squash-only
+#       setup) — keeps main's history to one commit per recipe/fix regardless of how many WIP
+#       commits a contributor pushed to their branch.
 name: Q&A
 
 on:
