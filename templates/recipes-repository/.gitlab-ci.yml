@@ -90,6 +90,10 @@ run-checks:
                 git push -f "https://gitlab-ci-token:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" "flex/mr-$CI_MERGE_REQUEST_IID"
                 git checkout "$CI_COMMIT_SHA"
                 git stash pop -q || true
+                # flex-endpoint/ is untracked (its *.json were mv'd out above, but archived/ isn't),
+                # so the git checkout above doesn't remove it — left alone it shows up as a bogus
+                # top-level "package" to the diff-recipe-versions find below.
+                rm -rf flex-endpoint
             fi
         - >
             curl --silent --request PUT --header "PRIVATE-TOKEN: ${VCS_TOKEN}"
