@@ -4,11 +4,12 @@
 namespace App\Tests\Registry;
 
 use App\Registry\UnavailableRegistryProvider;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 class UnavailableRegistryProviderTest extends TestCase
 {
-    /** @dataProvider methodProvider */
+    #[DataProvider('methodProvider')]
     public function testEveryMethodRethrowsTheWrappedError(callable $call): void
     {
         $original = new \RuntimeException('Unknown registry type "bogus" (known: packagist, artifactory).');
